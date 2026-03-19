@@ -17,6 +17,14 @@
         <module>tj-pay-api</module>
     </modules>
 
+    <dependencies>
+        <!-- 支付宝SDK：真正引入依赖，才会下载！ -->
+        <dependency>
+            <groupId>com.alipay.sdk</groupId>
+            <artifactId>alipay-sdk-java</artifactId>
+        </dependency>
+    </dependencies>
+
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
