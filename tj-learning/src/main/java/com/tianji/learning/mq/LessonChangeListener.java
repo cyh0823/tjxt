@@ -3,6 +3,7 @@ package com.tianji.learning.mq;
 import com.tianji.api.dto.trade.OrderBasicDTO;
 import com.tianji.common.constants.MqConstants;
 import com.tianji.common.utils.CollUtils;
+import com.tianji.common.utils.UserContext;
 import com.tianji.learning.service.ILearningLessonService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.core.ExchangeTypes;
@@ -33,5 +34,17 @@ public class LessonChangeListener {
         }
         // 向用户课程表添加课程
         iLearningLessonService.addUserLesson(order.getUserId(),order.getCourseIds());
+    }
+
+    @RabbitListener(bindings = @QueueBinding(
+            value = @Queue(name = "learning.lesson.refund.queue",durable = "true"),
+            exchange = @Exchange(name = MqConstants.Exchange.ORDER_EXCHANGE, type = ExchangeTypes.TOPIC),
+            key = MqConstants.Key.ORDER_REFUND_KEY
+    ))
+    public void listenLessonRefund(OrderBasicDTO order){
+        if (order == null || CollUtils.isEmpty(order.getCourseIds()) || order.getUserId() == null || order.getUserId().equals(UserContext.getUser())){
+            return;
+        }
+        order.getCourseIds().forEach(courseId -> iLearningLessonService.removeByCourseId(order.getOrderId()));
     }
 }
