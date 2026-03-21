@@ -23,7 +23,7 @@ public enum LessonStatus implements BaseEnum {
         this.desc = desc;
     }
 
-    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING) // 对前端提交的数据进行一个转化
     public static LessonStatus of(Integer value){
         if (value == null) {
             return null;
