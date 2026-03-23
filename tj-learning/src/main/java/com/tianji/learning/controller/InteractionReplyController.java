@@ -1,0 +1,45 @@
+package com.tianji.learning.controller;
+
+
+import com.tianji.common.domain.dto.PageDTO;
+import com.tianji.learning.domain.dto.ReplyDTO;
+import com.tianji.learning.domain.po.InteractionReply;
+import com.tianji.learning.domain.query.ReplyPageQuery;
+import com.tianji.learning.domain.vo.QuestionAdminVO;
+import com.tianji.learning.domain.vo.ReplyVO;
+import com.tianji.learning.service.IInteractionReplyService;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * <p>
+ * 互动问题的回答或评论 前端控制器
+ * </p>
+ *
+ * @author cyhhyc
+ * @since 2026-03-22
+ */
+@RestController
+@RequestMapping("/replies")
+@Api(tags = "互动回答或评论相关接口")
+@RequiredArgsConstructor
+public class InteractionReplyController {
+    private final IInteractionReplyService interactionReplyService;
+
+    @PostMapping
+    @ApiOperation("提交回答或评论")
+    public void updateReplyOrAnswer(ReplyDTO replyDTO) {
+        interactionReplyService.updateReplyOrAnswer(replyDTO);
+    }
+
+    @GetMapping("/page")
+    public PageDTO<ReplyVO> queryReplyPage(ReplyPageQuery query) {
+        return interactionReplyService.queryReplyPage(query);
+    }
+}
