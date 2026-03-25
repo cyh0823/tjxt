@@ -5,6 +5,8 @@ import com.tianji.api.client.course.CourseClient;
 import com.tianji.api.dto.course.CourseFullInfoDTO;
 import com.tianji.api.dto.leanring.LearningLessonDTO;
 import com.tianji.api.dto.leanring.LearningRecordDTO;
+import com.tianji.common.autoconfigure.mq.RabbitMqHelper;
+import com.tianji.common.constants.MqConstants;
 import com.tianji.common.exceptions.BizIllegalException;
 import com.tianji.common.exceptions.DbException;
 import com.tianji.common.utils.BeanUtils;
@@ -42,6 +44,7 @@ public class LearningRecordServiceImpl extends ServiceImpl<LearningRecordMapper,
     private final ILearningLessonService iLearningLessonService;
     private final CourseClient courseClient;
     private final LearningRecordDelayTaskHandler handler;
+    private final RabbitMqHelper mqHelper;
 
     @Override
     public LearningLessonDTO queryLearningRecordByCourse(Long courseId) {
@@ -81,6 +84,8 @@ public class LearningRecordServiceImpl extends ServiceImpl<LearningRecordMapper,
         }
         // 3.处理课程数据
         handleLearningLessonChange(dto);
+        // 4.发送消息给学生添加积分
+        mqHelper.send(MqConstants.Exchange.LEARNING_EXCHANGE,MqConstants.Key.LEARN_SECTION,userId);
     }
 
 

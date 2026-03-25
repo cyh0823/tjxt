@@ -1,6 +1,8 @@
 package com.tianji.learning.service.impl;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tianji.common.autoconfigure.mq.RabbitMqHelper;
+import com.tianji.common.constants.MqConstants;
 import com.tianji.common.domain.dto.PageDTO;
 import com.tianji.common.exceptions.BadRequestException;
 import com.tianji.common.utils.BeanUtils;
@@ -36,6 +38,7 @@ import java.util.List;
 public class InteractionReplyServiceImpl extends ServiceImpl<InteractionReplyMapper, InteractionReply> implements IInteractionReplyService {
 
     private final IInteractionQuestionService interactionQuestionService;
+    private RabbitMqHelper mqHelper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -48,7 +51,8 @@ public class InteractionReplyServiceImpl extends ServiceImpl<InteractionReplyMap
         }
         InteractionReply reply = BeanUtils.copyBean(replyDTO, InteractionReply.class);
         // 设置基本参数
-        reply.setUserId(UserContext.getUser());
+        Long userId = UserContext.getUser();
+        reply.setUserId(userId);
         // 设置评论数量和点赞数量为0   默认值就是0
         /*reply.setReplyTimes(0);
         reply.setLikedTimes(0);*/
@@ -71,6 +75,8 @@ public class InteractionReplyServiceImpl extends ServiceImpl<InteractionReplyMap
             if (!update) {
                 throw new BadRequestException("更新问题回答失败");
             }
+            // 如果是学生回答的,发送消息给学生添加积分
+            mqHelper.send(MqConstants.Exchange.LEARNING_EXCHANGE,MqConstants.Key.WRITE_REPLY,userId);
         }else {
             // 如果是对回答的评论，更新目标回复的评论次数
             boolean update = lambdaUpdate()
@@ -91,6 +97,7 @@ public class InteractionReplyServiceImpl extends ServiceImpl<InteractionReplyMap
             if (!update) {
                 throw new BadRequestException("更新问题状态失败");
             }
+
         }
     }
 
