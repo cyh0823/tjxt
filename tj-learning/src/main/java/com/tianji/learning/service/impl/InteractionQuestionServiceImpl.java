@@ -24,6 +24,7 @@ import com.tianji.learning.domain.query.QuestionPageQuery;
 import com.tianji.learning.domain.vo.QuestionAdminVO;
 import com.tianji.learning.domain.vo.QuestionVO;
 import com.tianji.learning.mapper.InteractionQuestionMapper;
+import com.tianji.learning.mapper.InteractionReplyMapper;
 import com.tianji.learning.service.IInteractionQuestionService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.tianji.learning.service.IInteractionReplyService;
@@ -46,7 +47,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class InteractionQuestionServiceImpl extends ServiceImpl<InteractionQuestionMapper, InteractionQuestion> implements IInteractionQuestionService {
 
-    private final IInteractionReplyService replyService;
+    private final InteractionReplyMapper replyMapper;
     private final UserClient userClient;
     private final CourseClient courseClient;
     private final SearchClient searchClient;
@@ -92,7 +93,7 @@ public class InteractionQuestionServiceImpl extends ServiceImpl<InteractionQuest
         answerIds.remove(null);
         Map<Long, InteractionReply> replyMap = new HashMap<>(answerIds.size());
         if (CollUtils.isNotEmpty(answerIds)) {
-            List<InteractionReply> replies = replyService.listByIds(answerIds);
+            List<InteractionReply> replies = replyMapper.selectBatchIds(answerIds);
             for (InteractionReply reply : replies) {
                 replyMap.put(reply.getId(), reply);
                 // 在查询回复者时，可以将非匿名的回复者id也加入到查询列表中，方便后续查询用户信息
