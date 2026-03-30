@@ -10,6 +10,7 @@ import com.tianji.promotion.domain.vo.CouponVO;
 import com.tianji.promotion.service.ICouponService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -54,5 +55,11 @@ public class CouponController {
     @ApiOperation("查询发放中的优惠券列表")
     public List<CouponVO> queryIssueCoupons() {
         return couponService.queryIssueCoupons();
+    }
+
+    @PutMapping("/{id}/pause")
+    @ApiOperation("暂停发放优惠券")
+    public void pauseIssue(@ApiParam(value = "优惠券id") @PathVariable Long id) {
+        couponService.pauseIssue(id);
     }
 }

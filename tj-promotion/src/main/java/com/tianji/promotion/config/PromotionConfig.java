@@ -1,5 +1,7 @@
 package com.tianji.promotion.config;
 
+import com.tianji.promotion.utils.MyLockAspect;
+import org.redisson.api.RedissonClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -21,4 +23,9 @@ public class PromotionConfig {
         executor.initialize();
         return executor;
     }
+
+    /*@Bean
+    public MyLockAspect myLockAspect(RedissonClient redissonClient) {
+        return new MyLockAspect(redissonClient);
+    }*/
 }

@@ -4,10 +4,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tianji.common.domain.dto.PageDTO;
 import com.tianji.common.exceptions.BadRequestException;
 import com.tianji.common.exceptions.BizIllegalException;
-import com.tianji.common.utils.BeanUtils;
-import com.tianji.common.utils.CollUtils;
-import com.tianji.common.utils.StringUtils;
-import com.tianji.common.utils.UserContext;
+import com.tianji.common.utils.*;
+import com.tianji.promotion.constants.PromotionConstant;
 import com.tianji.promotion.domain.dto.CouponFormDTO;
 import com.tianji.promotion.domain.dto.CouponIssueFormDTO;
 import com.tianji.promotion.domain.po.Coupon;
@@ -26,13 +24,19 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.tianji.promotion.service.IExchangeCodeService;
 import com.tianji.promotion.service.IUserCouponService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.tianji.promotion.enums.CouponStatus.*;
 
 /**
  * <p>
@@ -44,11 +48,13 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> implements ICouponService {
 
     private final ICouponScopeService couponScopeService;
     private final IExchangeCodeService exchangeCodeService;
     private final IUserCouponService userCouponService;
+    private final StringRedisTemplate redisTemplate;
 
     @Override
     public void saveCoupon(CouponFormDTO couponFormDTO) {
@@ -87,6 +93,7 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
     }
 
     @Override
+    @Transactional
     public void beginIssue(CouponIssueFormDTO couponIssueFormDTO) {
         // 查询优惠券
         Long couponId = couponIssueFormDTO.getId();
@@ -112,13 +119,30 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
             result.setStatus(CouponStatus.UN_ISSUE);
             // TODO 定时任务
         }
+        updateById(result);
 
+        if (isBegin) {
+            // 添加缓存
+            coupon.setIssueBeginTime(result.getIssueBeginTime());
+            coupon.setIssueEndTime(result.getIssueEndTime());
+            cacheCouponInfo(coupon);
+        }
         // 判断是否需要发放兑换码
         if (coupon.getStatus() == CouponStatus.DRAFT || coupon.getObtainWay() == ObtainType.ISSUE) {
             coupon.setIssueEndTime(result.getIssueEndTime());
             exchangeCodeService.asyncGenerateCode(coupon);
         }
-        updateById(result);
+
+    }
+
+    private void cacheCouponInfo(Coupon coupon) {
+        Map<String, String> map = new HashMap<>(4);
+        map.put("issueBeginTime", String.valueOf(DateUtils.toEpochMilli(coupon.getIssueBeginTime())));
+        map.put("issueEndTime", String.valueOf(DateUtils.toEpochMilli(coupon.getIssueEndTime())));
+        map.put("totalNum", String.valueOf(coupon.getTotalNum()));
+        map.put("userLimit", String.valueOf(coupon.getUserLimit()));
+
+        redisTemplate.opsForHash().putAll(PromotionConstant.COUPON_CACHE_KEY_PREFIX + coupon.getId(), map);
     }
 
     @Override
@@ -154,5 +178,31 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
             voList.add(vo);
         }
         return List.of();
+    }
+
+    @Override
+    @Transactional
+    public void pauseIssue(Long id) {
+        // 查询旧的优惠券
+        Coupon coupon = getById(id);
+        if (BeanUtils.isEmpty(coupon)) {
+            throw new BadRequestException("优惠券不存在!");
+        }
+        if (coupon.getStatus() != ISSUING && coupon.getStatus() != UN_ISSUE) {
+            return;
+        }
+
+        // 更新状态
+        boolean success = lambdaUpdate()
+                .set(Coupon::getStatus, PAUSE)
+                .eq(Coupon::getId, id)
+                .update();
+
+        if (!success) {
+            log.error("重复暂停优惠券,id:{}",id);
+        }
+
+        // 删除缓存
+        redisTemplate.delete(PromotionConstant.COUPON_CACHE_KEY_PREFIX + id);
     }
 }

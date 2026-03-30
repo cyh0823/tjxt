@@ -1,5 +1,6 @@
 package com.tianji.promotion.service.impl;
 
+import com.tianji.promotion.constants.PromotionConstant;
 import com.tianji.promotion.domain.po.Coupon;
 import com.tianji.promotion.domain.po.ExchangeCode;
 import com.tianji.promotion.mapper.ExchangeCodeMapper;
@@ -63,6 +64,9 @@ public class ExchangeCodeServiceImpl extends ServiceImpl<ExchangeCodeMapper, Exc
             list.add(exchangeCode);
         }
         saveBatch(list);
+
+        // 写入Redis缓存
+        redisTemplate.opsForZSet().add(PromotionConstant.COUPON_CODE_RANGE_KEY, coupon.getId().toString(), total);
     }
 
     @Override
