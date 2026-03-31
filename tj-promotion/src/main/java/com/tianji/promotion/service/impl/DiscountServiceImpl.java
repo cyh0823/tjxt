@@ -70,7 +70,7 @@ public class DiscountServiceImpl implements IDiscountService {
         for (List<Coupon> solution : solutions) {
             // 异步计算
             CompletableFuture
-                    .supplyAsync(() -> caculateSolutionDiscount(solution,map, orderCourses))
+                    .supplyAsync(() -> caculateSolutionDiscount(solution,map, orderCourses), discountSolutionExecutor)
                     .thenAccept(result -> {
                         list.add(result);
                         latch.countDown();
