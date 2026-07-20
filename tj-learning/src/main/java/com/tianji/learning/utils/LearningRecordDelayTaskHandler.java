@@ -32,9 +32,9 @@ public class LearningRecordDelayTaskHandler {
     private final ILearningLessonService learningLessonService;
     private static volatile boolean begin = true;   // volatile：保证对所有线程可见
 
+    // 项目启动后就需要异步地执行这个任务
     @PostConstruct
     public void init(){
-        // 需要对处理延时任务的方法进行初始化（类似MQ监听者）
         CompletableFuture.runAsync(this::handleDelayTask);
     }
 

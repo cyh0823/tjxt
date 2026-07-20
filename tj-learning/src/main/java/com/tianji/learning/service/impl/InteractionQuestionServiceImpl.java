@@ -70,7 +70,7 @@ public class InteractionQuestionServiceImpl extends ServiceImpl<InteractionQuest
             throw new BadRequestException("查询的小节数和课程不能同时为空");
         }
         Page<InteractionQuestion> page = lambdaQuery()
-                .select(InteractionQuestion.class,info -> !info.getProperty().equals("description"))
+                .select(info -> !info.getProperty().equals("description"))
                 .eq(pageQuery.getOnlyMine(), InteractionQuestion::getUserId, UserContext.getUser())
                 .eq(courseId != null, InteractionQuestion::getCourseId, courseId)
                 .eq(sectionId != null, InteractionQuestion::getSectionId, sectionId)
@@ -80,6 +80,7 @@ public class InteractionQuestionServiceImpl extends ServiceImpl<InteractionQuest
         if (CollUtils.isEmpty(records)) {
             return PageDTO.empty(page);
         }
+
         // 根据Id查询提问者和最近一次的回答者
         Set<Long> userIds = new HashSet<>();
         Set<Long> answerIds = new HashSet<>();

@@ -1,7 +1,5 @@
 package com.tianji.promotion.service.impl;
 
-import cn.hutool.core.map.MapUtil;
-import com.alibaba.nacos.common.utils.MapUtils;
 import com.tianji.api.dto.promotion.CouponDiscountDTO;
 import com.tianji.api.dto.promotion.OrderCourseDTO;
 import com.tianji.common.utils.CollUtils;
@@ -10,7 +8,6 @@ import com.tianji.promotion.domain.po.Coupon;
 import com.tianji.promotion.domain.po.CouponScope;
 import com.tianji.promotion.mapper.UserCouponMapper;
 import com.tianji.promotion.service.ICouponScopeService;
-import com.tianji.promotion.service.ICouponService;
 import com.tianji.promotion.service.IDiscountService;
 import com.tianji.promotion.strategy.discount.Discount;
 import com.tianji.promotion.strategy.discount.DiscountStrategy;
@@ -140,7 +137,7 @@ public class DiscountServiceImpl implements IDiscountService {
             discountDTO.setDiscountAmount(discountMoney + discountDTO.getDiscountAmount());  // 累加
             discountDTO.getRules().add(discount.getRule(coupon));
         }
-        return null;
+        return discountDTO;
     }
 
     private static void caculateDiscountDetails(List<OrderCourseDTO> orderCourseDTOS, Map<Long, Integer> detailMap, int totalAmount, int discountMoney) {
