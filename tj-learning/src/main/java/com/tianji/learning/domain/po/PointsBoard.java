@@ -1,5 +1,6 @@
 package com.tianji.learning.domain.po;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -43,12 +44,13 @@ public class PointsBoard implements Serializable {
     /**
      * 名次，只记录赛季前100
      */
+    @TableField(exist = false) // rank不是数据库字段
     private Integer rank;
 
     /**
      * 赛季，例如 1,就是第一赛季，2-就是第二赛季
      */
+    @TableField(exist = false) // season不是数据库字段
     private Integer season;
-
 
 }

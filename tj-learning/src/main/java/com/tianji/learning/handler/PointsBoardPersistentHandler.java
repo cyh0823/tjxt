@@ -43,20 +43,22 @@ public class PointsBoardPersistentHandler {
         // 动态查询表名
         Integer season = seasonService.querySeasonByTime(time);
         TableInfoContext.setInfo("points_board_" + season);
-        while (true) {
-            List<PointsBoard> list = pointsBoardService.queryCurrentBoardList(key, pageNo++, pageSize);
-            if (CollUtils.isEmpty(list)) {
-                break;
+        try {
+            while (true) {
+                List<PointsBoard> list = pointsBoardService.queryCurrentBoardList(key, pageNo++, pageSize);
+                if (CollUtils.isEmpty(list)) {
+                    break;
+                }
+                // 批量保存
+                list.forEach(p -> {
+                    p.setId(p.getRank().longValue());
+                    p.setRank(null);
+                });
+                pointsBoardService.saveBatch(list);
             }
-            // 批量保存
-            list.forEach(p -> {
-                p.setId(p.getRank().longValue());
-                p.setRank(null);
-            });
-            pointsBoardService.saveBatch(list);
+        }  finally {
+            TableInfoContext.clear();
         }
-
-        TableInfoContext.clear();
     }
 
     @XxlJob("clearPointsBoardFromRedis")

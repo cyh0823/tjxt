@@ -28,8 +28,13 @@ public class MybatisConfig {
 
     @Bean
     @ConditionalOnMissingBean
-    public MybatisPlusInterceptor mybatisPlusInterceptor(@Autowired(required = false) DynamicTableNameInnerInterceptor innerInterceptor) {
+    public MybatisPlusInterceptor mybatisPlusInterceptor(
+            @Autowired(required = false) DynamicTableNameInnerInterceptor innerInterceptor) {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
+        // 表名插件
+        if (innerInterceptor != null) {
+            interceptor.addInnerInterceptor(innerInterceptor);
+        }
         PaginationInnerInterceptor paginationInnerInterceptor = new PaginationInnerInterceptor(DbType.MYSQL);
         paginationInnerInterceptor.setMaxLimit(200L);
         interceptor.addInnerInterceptor(paginationInnerInterceptor);

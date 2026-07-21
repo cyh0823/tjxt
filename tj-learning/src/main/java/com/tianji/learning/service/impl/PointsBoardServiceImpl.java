@@ -1,5 +1,6 @@
 package com.tianji.learning.service.impl;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tianji.api.client.user.UserClient;
 import com.tianji.api.dto.user.UserDTO;
 import com.tianji.common.utils.BeanUtils;
@@ -14,6 +15,7 @@ import com.tianji.learning.domain.vo.PointsBoardVO;
 import com.tianji.learning.mapper.PointsBoardMapper;
 import com.tianji.learning.service.IPointsBoardService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.tianji.learning.utils.TableInfoContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.BoundZSetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -99,8 +101,27 @@ public class PointsBoardServiceImpl extends ServiceImpl<PointsBoardMapper, Point
         return pointsBoard;
     }
 
+    // 根据赛季id查询用户数据
     private PointsBoard queryMyHistoryBoard(Long season) {
-        return null;
+        // 根据赛季id修改表名
+        TableInfoContext.setInfo("points_board_" + season);
+        try {
+            Long userId = UserContext.getUser();
+            PointsBoard userData = lambdaQuery()
+                    .eq(userId != null, PointsBoard::getUserId, userId)
+                    .one();
+            // 该用户不在一百名以内，直接返回空数据（原业务对字段有判空操作）
+            if (BeanUtils.isEmpty(userData)) {
+                return new PointsBoard();
+            }
+            // 查到用户信息，此时需要设置rank属性
+            userData.setRank(userData.getId().intValue());
+
+            return userData;
+        } finally {
+            // 防御式编程：保证最后一定会释放
+            TableInfoContext.clear();
+        }
     }
 
     @Override
@@ -128,6 +149,27 @@ public class PointsBoardServiceImpl extends ServiceImpl<PointsBoardMapper, Point
     }
 
     private List<PointsBoard> queryHistoryBoardList(PointsBoardQuery pointsBoardQuery) {
-        return null;
+        // 根据赛季id修改表名
+        Long season = pointsBoardQuery.getSeason();
+        if (season == null) {
+            throw new NullPointerException("赛季id不能为空");
+        }
+        TableInfoContext.setInfo("points_board_" + season);
+        try {
+            // 分页查询历史排行榜
+            Page<PointsBoard> page = lambdaQuery().page(pointsBoardQuery.toMpPage());
+            List<PointsBoard> records = page.getRecords();
+            if (CollUtils.isEmpty(records)){
+                return CollUtils.emptyList();
+            }
+            int rank = (pointsBoardQuery.getPageNo() - 1) * pointsBoardQuery.getPageSize() + 1;
+            for (PointsBoard record : records) {
+                record.setRank(rank++);
+            }
+
+            return records;
+        }  finally {
+            TableInfoContext.clear();
+        }
     }
 }
