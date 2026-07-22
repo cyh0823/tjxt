@@ -78,7 +78,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 2.1.计算订单金额
         Integer totalAmount = courseInfos.stream()
                 .map(CourseSimpleInfoDTO::getPrice).reduce(Integer::sum).orElse(0);
-        // TODO 2.2.计算优惠金额
+        // 2.2.计算优惠金额
         order.setDiscountAmount(0);
         Integer realAmount = totalAmount - order.getDiscountAmount();
         // 2.3.封装其它信息

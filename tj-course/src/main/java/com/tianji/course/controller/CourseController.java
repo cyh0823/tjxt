@@ -51,13 +51,6 @@ public class CourseController {
     @Autowired
     private ICourseCatalogueService courseCatalogueService;
 
-    //todo 二期做
-//    @GetMapping("statistics")
-//    @ApiOperation("课程数据统计")
-    public CourseStatisticsVO statistics() {
-        return null;
-    }
-
     @GetMapping("baseInfo/{id}")
     @ApiOperation("获取课程基础信息")
     @ApiImplicitParams({@ApiImplicitParam(name = "id", value = "课程id"),

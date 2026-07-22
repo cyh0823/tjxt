@@ -1,6 +1,8 @@
 package com.tianji.promotion.service.impl;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tianji.common.autoconfigure.mq.RabbitMqHelper;
+import com.tianji.common.constants.MqConstants;
 import com.tianji.common.domain.dto.PageDTO;
 import com.tianji.common.exceptions.BadRequestException;
 import com.tianji.common.exceptions.BizIllegalException;
@@ -18,18 +20,22 @@ import com.tianji.promotion.enums.CouponStatus;
 import com.tianji.promotion.enums.ObtainType;
 import com.tianji.promotion.enums.UserCouponStatus;
 import com.tianji.promotion.mapper.CouponMapper;
+import com.tianji.promotion.mq.message.ChangeStatusMessage;
 import com.tianji.promotion.service.ICouponScopeService;
 import com.tianji.promotion.service.ICouponService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.tianji.promotion.service.IExchangeCodeService;
 import com.tianji.promotion.service.IUserCouponService;
+import com.xxl.job.core.handler.annotation.XxlJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -55,6 +61,7 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
     private final IExchangeCodeService exchangeCodeService;
     private final IUserCouponService userCouponService;
     private final StringRedisTemplate redisTemplate;
+    private final RabbitMqHelper mqHelper;
 
     @Override
     public void saveCoupon(CouponFormDTO couponFormDTO) {
@@ -95,6 +102,13 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
     @Override
     @Transactional
     public void beginIssue(CouponIssueFormDTO couponIssueFormDTO) {
+        // 校验数据
+        LocalDateTime beginTime = couponIssueFormDTO.getIssueBeginTime();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime endTime = couponIssueFormDTO.getIssueEndTime();
+        if (beginTime != null && beginTime.isAfter(endTime)) {
+            throw new BadRequestException("结束时间不能在开始时间之前!");
+        }
         // 查询优惠券
         Long couponId = couponIssueFormDTO.getId();
         Coupon coupon = getById(couponId);
@@ -105,8 +119,6 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
             throw new BizIllegalException("优惠券状态错误");
         }
         // 判断优惠券是否立刻开放
-        LocalDateTime beginTime = coupon.getIssueBeginTime();
-        LocalDateTime now = LocalDateTime.now();
         boolean isBegin = beginTime == null || !beginTime.isAfter(now);
         // 拷贝属性
         Coupon result = BeanUtils.copyBean(couponIssueFormDTO, Coupon.class);
@@ -114,10 +126,16 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
             // 立即发放，设置状态为进行中发放
             result.setStatus(CouponStatus.ISSUING);
             result.setIssueBeginTime(now);
+            // 设置延时任务：时间到了就将优惠券状态设为已结束
+            task(now, endTime, couponId, false);
         }else {
-            // 定时发放，设置状态为未开始发放
+            // 延时发放，设置状态为未开始发放
             result.setStatus(CouponStatus.UN_ISSUE);
-            // TODO 定时任务
+            // 设置发放时间与结束时间
+            result.setIssueBeginTime(beginTime);
+            result.setIssueEndTime(endTime);
+            // 定时任务
+            task(now, beginTime, couponId, true);
         }
         updateById(result);
 
@@ -132,8 +150,19 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
             coupon.setIssueEndTime(result.getIssueEndTime());
             exchangeCodeService.asyncGenerateCode(coupon);
         }
-
     }
+
+    private void task(LocalDateTime now, LocalDateTime time, Long couponId, Boolean isBegin) {
+        // 计算延时时间
+        Duration delay = Duration.between(now, time);
+        // 用MQ发送延时消息
+        mqHelper.sendDelayMessage(
+                MqConstants.Exchange.PROMOTION_EXCHANGE,
+                MqConstants.Key.COUPON_RECEIVE,
+                ChangeStatusMessage.of(couponId, isBegin),
+                delay);
+    }
+
 
     private void cacheCouponInfo(Coupon coupon) {
         Map<String, String> map = new HashMap<>(4);
@@ -177,7 +206,7 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
             vo.setReceived(unusedMap.getOrDefault(c.getId(),0L) > 0);
             voList.add(vo);
         }
-        return List.of();
+        return voList;
     }
 
     @Override

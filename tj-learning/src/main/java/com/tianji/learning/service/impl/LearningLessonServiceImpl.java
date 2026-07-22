@@ -15,6 +15,7 @@ import com.tianji.common.exceptions.BadRequestException;
 import com.tianji.common.utils.*;
 import com.tianji.learning.domain.po.LearningLesson;
 import com.tianji.learning.domain.po.LearningRecord;
+import com.tianji.learning.domain.po.PointsRecord;
 import com.tianji.learning.domain.vo.LearningLessonVO;
 import com.tianji.learning.domain.vo.LearningPlanPageVO;
 import com.tianji.learning.domain.vo.LearningPlanVO;
@@ -24,6 +25,7 @@ import com.tianji.learning.mapper.LearningLessonMapper;
 import com.tianji.learning.mapper.LearningRecordMapper;
 import com.tianji.learning.service.ILearningLessonService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.tianji.learning.service.IPointsRecordService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +53,7 @@ public class LearningLessonServiceImpl extends ServiceImpl<LearningLessonMapper,
     private final CourseClient courseClient;
     private final LearningRecordMapper learningRecordMapper;
     private final CatalogueClient catalogueClient;
+    private final IPointsRecordService pointsRecordService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -207,7 +210,13 @@ public class LearningLessonServiceImpl extends ServiceImpl<LearningLessonMapper,
         result.setWeekFinished(count);
         // 获取本周总共小节数
         getBaseMapper().queryTotalPlans(userId);
-        // TODO 查询积分数
+        // 查询本周学习积分
+        LocalDate now = LocalDate.now();
+        LocalDateTime weekBeginTime = DateUtils.getWeekBeginTime(now);
+        LocalDateTime weekEndTime = DateUtils.getWeekEndTime(now);
+        List<PointsRecord> pointsRecords = pointsRecordService.getPointsRecords(userId, weekBeginTime, weekEndTime);
+        int sumPoints = pointsRecords.stream().mapToInt(PointsRecord::getPoints).sum();
+        result.setWeekPoints(sumPoints);
 
         // 查询分页记录
         // 分页查询课表信息以及学习计划信息

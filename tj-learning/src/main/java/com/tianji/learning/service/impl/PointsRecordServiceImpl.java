@@ -15,7 +15,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,11 +69,7 @@ public class PointsRecordServiceImpl extends ServiceImpl<PointsRecordMapper, Poi
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime begin = DateUtils.getDayStartTime(now);
         LocalDateTime end = DateUtils.getDayEndTime(now);
-        QueryWrapper<PointsRecord> queryWrapper = new QueryWrapper<>();
-        queryWrapper.lambda()
-                .eq(PointsRecord::getUserId,userId)
-                .between(PointsRecord::getCreateTime,begin,end);
-        List<PointsRecord> pointsRecords = baseMapper.queryUserPointsByDate(queryWrapper);
+        List<PointsRecord> pointsRecords = getPointsRecords(userId, begin, end);
         if (CollUtils.isEmpty(pointsRecords)) {
             return CollUtils.emptyList();
         }
@@ -87,6 +82,16 @@ public class PointsRecordServiceImpl extends ServiceImpl<PointsRecordMapper, Poi
             voList.add(vo);
         }
         return voList;
+    }
+
+    @Override
+    public List<PointsRecord> getPointsRecords(Long userId, LocalDateTime begin, LocalDateTime end) {
+        QueryWrapper<PointsRecord> queryWrapper = new QueryWrapper<>();
+        queryWrapper.lambda()
+                .eq(PointsRecord::getUserId, userId)
+                .between(PointsRecord::getCreateTime,begin,end);
+        List<PointsRecord> pointsRecords = baseMapper.queryUserPointsByDate(queryWrapper);
+        return pointsRecords;
     }
 
     private int queryUserPointsByTypeAndDate(Long userId, PointsRecordType pointsRecordType, LocalDateTime begin, LocalDateTime end) {

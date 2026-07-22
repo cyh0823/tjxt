@@ -1,5 +1,7 @@
 package com.tianji.learning.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tianji.api.cache.CategoryCache;
 import com.tianji.api.client.course.CatalogueClient;
@@ -27,9 +29,9 @@ import com.tianji.learning.mapper.InteractionQuestionMapper;
 import com.tianji.learning.mapper.InteractionReplyMapper;
 import com.tianji.learning.service.IInteractionQuestionService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.tianji.learning.service.IInteractionReplyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -277,6 +279,7 @@ public class InteractionQuestionServiceImpl extends ServiceImpl<InteractionQuest
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void removeQuestionById(Long id) {
         InteractionQuestion question = getById(id);
         if (BeanUtils.isEmpty(question)) {
@@ -286,7 +289,14 @@ public class InteractionQuestionServiceImpl extends ServiceImpl<InteractionQuest
         if (!Objects.equals(userId,question.getUserId())) {
             throw new IllegalArgumentException("您没有权限删除该问题");
         }
-        // TODO 删除问题下的所有回答和评论（完成回答和评论相关接口后）
+        // 删除问题下的所有回答和评论
+        replyMapper.delete(new LambdaQueryWrapper<InteractionReply>()
+                .eq(question.getId() != null,InteractionReply::getQuestionId , question.getId()));
+        // 删除问题
+        boolean questionDeleted = removeById(id);
+        if (!questionDeleted) {
+            throw new RuntimeException("删除回答失败");
+        }
     }
 
     @Override

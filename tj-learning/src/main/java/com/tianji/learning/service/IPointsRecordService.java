@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.tianji.learning.domain.vo.PointsStatisticsVO;
 import com.tianji.learning.enums.PointsRecordType;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -20,4 +21,6 @@ public interface IPointsRecordService extends IService<PointsRecord> {
     void addPointsRecord(Long userId, int points, PointsRecordType pointsRecordType);
 
     List<PointsStatisticsVO> queryMyPointsToday();
+
+    List<PointsRecord> getPointsRecords(Long userId, LocalDateTime begin, LocalDateTime end);
 }
