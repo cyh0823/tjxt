@@ -1,6 +1,7 @@
 package com.tianji.learning.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.tianji.common.utils.CollUtils;
 import com.tianji.common.utils.DateUtils;
 import com.tianji.common.utils.UserContext;
@@ -10,7 +11,6 @@ import com.tianji.learning.domain.vo.PointsStatisticsVO;
 import com.tianji.learning.enums.PointsRecordType;
 import com.tianji.learning.mapper.PointsRecordMapper;
 import com.tianji.learning.service.IPointsRecordService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -24,8 +24,7 @@ import java.util.List;
  * 学习积分记录，每个月底清零 服务实现类
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-24
+ * @author 虎哥
  */
 @Service
 @RequiredArgsConstructor
@@ -34,73 +33,79 @@ public class PointsRecordServiceImpl extends ServiceImpl<PointsRecordMapper, Poi
     private final StringRedisTemplate redisTemplate;
 
     @Override
-    public void addPointsRecord(Long userId, int points, PointsRecordType pointsRecordType) {
-        // 1.查询当前类型积分有没有上限
-        int maxPoints = pointsRecordType.getMaxPoints();
+    public void addPointsRecord(Long userId, int points, PointsRecordType type) {
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime begin = DateUtils.getDayStartTime(now);
-        LocalDateTime end = DateUtils.getDayEndTime(now);
-        if (maxPoints > 0){
-            // 2.有上限，判断当前用户积分是否超过上限
-            int currentPoints = queryUserPointsByTypeAndDate(userId,pointsRecordType,begin,end);
-            if (currentPoints >= maxPoints){
-                // 有上限，且超过上限，不添加
+        int maxPoints = type.getMaxPoints();
+        // 1.判断当前方式有没有积分上限
+        int realPoints = points;
+        if(maxPoints > 0) {
+            // 2.有，则需要判断是否超过上限
+            LocalDateTime begin = DateUtils.getDayStartTime(now);
+            LocalDateTime end = DateUtils.getDayEndTime(now);
+            // 2.1.查询今日已得积分
+            int currentPoints = queryUserPointsByTypeAndDate(userId, type, begin, end);
+            // 2.2.判断是否超过上限
+            if(currentPoints >= maxPoints) {
+                // 2.3.超过，直接结束
                 return;
             }
-            // 3.未超过上限，添加积分记录
-            if (points + currentPoints > maxPoints) {
-                points = maxPoints - currentPoints;
+            // 2.4.没超过，保存积分记录
+            if(currentPoints + points > maxPoints){
+                realPoints = maxPoints - currentPoints;
             }
         }
-        // 4.无上限，添加积分记录（添加的是记录，不用计算总分）
+        // 3.没有，直接保存积分记录
         PointsRecord p = new PointsRecord();
-        p.setPoints(points);
-        p.setType(pointsRecordType);
+        p.setPoints(realPoints);
         p.setUserId(userId);
+        p.setType(type);
         save(p);
-        // 5.将积分累加到用户积分板
+        // 4.更新总积分到Redis
         String key = RedisConstants.POINTS_BOARD_KEY_PREFIX + now.format(DateUtils.POINTS_BOARD_SUFFIX_FORMATTER);
-        redisTemplate.opsForZSet().incrementScore(key,userId.toString(),points);
+        redisTemplate.opsForZSet().incrementScore(key, userId.toString(), realPoints);
     }
 
     @Override
     public List<PointsStatisticsVO> queryMyPointsToday() {
+        // 1.获取用户
         Long userId = UserContext.getUser();
+        // 2.获取日期
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime begin = DateUtils.getDayStartTime(now);
         LocalDateTime end = DateUtils.getDayEndTime(now);
-        List<PointsRecord> pointsRecords = getPointsRecords(userId, begin, end);
-        if (CollUtils.isEmpty(pointsRecords)) {
+        // 3.构建查询条件
+        QueryWrapper<PointsRecord> wrapper = new QueryWrapper<>();
+        wrapper.lambda()
+                .eq(PointsRecord::getUserId, userId)
+                .between(PointsRecord::getCreateTime, begin, end);
+        // 4.查询
+        List<PointsRecord> list = getBaseMapper().queryUserPointsByDate(wrapper);
+        if (CollUtils.isEmpty(list)) {
             return CollUtils.emptyList();
         }
-        List<PointsStatisticsVO> voList = new ArrayList<>(pointsRecords.size());
-        for (PointsRecord pointsRecord : pointsRecords) {
+        // 5.封装返回
+        List<PointsStatisticsVO> vos = new ArrayList<>(list.size());
+        for (PointsRecord p : list) {
             PointsStatisticsVO vo = new PointsStatisticsVO();
-            vo.setType(pointsRecord.getType().getDesc());
-            vo.setPoints(pointsRecord.getPoints());
-            vo.setMaxPoints(pointsRecord.getType().getMaxPoints());
-            voList.add(vo);
+            vo.setType(p.getType().getDesc());
+            vo.setMaxPoints(p.getType().getMaxPoints());
+            vo.setPoints(p.getPoints());
+            vos.add(vo);
         }
-        return voList;
+        return vos;
     }
 
-    @Override
-    public List<PointsRecord> getPointsRecords(Long userId, LocalDateTime begin, LocalDateTime end) {
-        QueryWrapper<PointsRecord> queryWrapper = new QueryWrapper<>();
-        queryWrapper.lambda()
+    private int queryUserPointsByTypeAndDate(
+            Long userId, PointsRecordType type, LocalDateTime begin, LocalDateTime end) {
+        // 1.查询条件
+        QueryWrapper<PointsRecord> wrapper = new QueryWrapper<>();
+        wrapper.lambda()
                 .eq(PointsRecord::getUserId, userId)
-                .between(PointsRecord::getCreateTime,begin,end);
-        List<PointsRecord> pointsRecords = baseMapper.queryUserPointsByDate(queryWrapper);
-        return pointsRecords;
-    }
-
-    private int queryUserPointsByTypeAndDate(Long userId, PointsRecordType pointsRecordType, LocalDateTime begin, LocalDateTime end) {
-        QueryWrapper<PointsRecord> queryWrapper = new QueryWrapper<>();
-        queryWrapper.lambda()
-                .eq(PointsRecord::getUserId,userId)
-                .eq(pointsRecordType!=null,PointsRecord::getType,pointsRecordType)
-                .between(begin!=null&&end!=null,PointsRecord::getCreateTime,begin,end);
-        Integer points = baseMapper.queryUserPointsByTypeAndDate(queryWrapper);
+                .eq(type != null, PointsRecord::getType, type)
+                .between(begin != null && end != null, PointsRecord::getCreateTime, begin, end);
+        // 2.调用mapper，查询结果
+        Integer points = getBaseMapper().queryUserPointsByTypeAndDate(wrapper);
+        // 3.判断并返回
         return points == null ? 0 : points;
     }
 }

@@ -12,12 +12,15 @@ import com.tianji.learning.domain.vo.ReplyVO;
  * 互动问题的回答或评论 服务类
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-22
+ * @author 虎哥
  */
 public interface IInteractionReplyService extends IService<InteractionReply> {
 
-    void updateReplyOrAnswer(ReplyDTO replyDTO);
+    void saveReply(ReplyDTO replyDTO);
 
-    PageDTO<ReplyVO> queryReplyPage(ReplyPageQuery query);
+    PageDTO<ReplyVO> queryReplyPage(ReplyPageQuery pageQuery, boolean isStudent);
+
+    void hiddenReply(Long id, Boolean hidden);
+
+    ReplyVO queryReplyById(Long id);
 }

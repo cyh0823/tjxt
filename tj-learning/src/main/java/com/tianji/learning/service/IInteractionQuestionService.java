@@ -1,40 +1,36 @@
 package com.tianji.learning.service;
 
+import com.baomidou.mybatisplus.extension.service.IService;
 import com.tianji.common.domain.dto.PageDTO;
-import com.tianji.common.domain.query.PageQuery;
 import com.tianji.learning.domain.dto.QuestionFormDTO;
 import com.tianji.learning.domain.po.InteractionQuestion;
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.tianji.learning.domain.query.QuestionAdminPageQuery;
 import com.tianji.learning.domain.query.QuestionPageQuery;
 import com.tianji.learning.domain.vo.QuestionAdminVO;
 import com.tianji.learning.domain.vo.QuestionVO;
-
-import javax.validation.Valid;
 
 /**
  * <p>
  * 互动提问的问题表 服务类
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-22
+ * @author 虎哥
  */
 public interface IInteractionQuestionService extends IService<InteractionQuestion> {
 
-    void saveQuestion(@Valid QuestionFormDTO questionDTO);
+    InteractionQuestion saveQuestion(QuestionFormDTO questionDTO);
 
-    PageDTO<QuestionVO> queryPageQuestion(QuestionPageQuery pageQuery);
+    PageDTO<QuestionVO> queryQuestionPage(QuestionPageQuery query);
 
     QuestionVO queryQuestionById(Long id);
 
-    PageDTO<QuestionAdminVO> queryPageAdminQuestion(QuestionAdminPageQuery pageQuery);
+    PageDTO<QuestionAdminVO> queryQuestionPageAdmin(QuestionAdminPageQuery query);
 
-    QuestionAdminVO queryAdminQuestionById(Long id);
+    QuestionAdminVO queryQuestionByIdAdmin(Long id);
 
-    void updateQuestion(Long id, QuestionFormDTO question);
+    void hiddenQuestion(Long id, Boolean hidden);
 
-    void removeQuestionById(Long id);
+    void updateQuestion(Long id, QuestionFormDTO questionDTO);
 
-    void updateHidden(Long id, Boolean hidden);
+    void deleteById(Long id);
 }

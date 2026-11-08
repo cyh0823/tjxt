@@ -1,45 +1,38 @@
 package com.tianji.learning.controller;
 
-
 import com.tianji.common.domain.dto.PageDTO;
 import com.tianji.learning.domain.dto.ReplyDTO;
-import com.tianji.learning.domain.po.InteractionReply;
 import com.tianji.learning.domain.query.ReplyPageQuery;
-import com.tianji.learning.domain.vo.QuestionAdminVO;
 import com.tianji.learning.domain.vo.ReplyVO;
 import com.tianji.learning.service.IInteractionReplyService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 
-import org.springframework.web.bind.annotation.RestController;
+import jakarta.annotation.Resource;
 
 /**
- * <p>
  * 互动问题的回答或评论 前端控制器
- * </p>
- *
- * @author cyhhyc
- * @since 2026-03-22
  */
 @RestController
 @RequestMapping("/replies")
-@Api(tags = "互动回答或评论相关接口")
+@Tag(name = "互动问答相关接口")
 @RequiredArgsConstructor
 public class InteractionReplyController {
-    private final IInteractionReplyService interactionReplyService;
 
+    @Resource
+    private IInteractionReplyService replyService;
+
+    @Operation(summary = "新增回答或评论")
     @PostMapping
-    @ApiOperation("提交回答或评论")
-    public void updateReplyOrAnswer(ReplyDTO replyDTO) {
-        interactionReplyService.updateReplyOrAnswer(replyDTO);
+    public void saveReply(@RequestBody ReplyDTO replyDTO) {
+        replyService.saveReply(replyDTO);
     }
 
-    @GetMapping("/page")
-    public PageDTO<ReplyVO> queryReplyPage(ReplyPageQuery query) {
-        return interactionReplyService.queryReplyPage(query);
+    @Operation(summary = "分页查询回答或评论")
+    @GetMapping("page")
+    public PageDTO<ReplyVO> queryReplyPage(ReplyPageQuery pageQuery) {
+        return replyService.queryReplyPage(pageQuery, false);
     }
 }

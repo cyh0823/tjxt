@@ -1,13 +1,15 @@
 package com.tianji.learning.service.impl;
 
+import com.baomidou.mybatisplus.core.metadata.OrderItem;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.tianji.api.client.remark.RemarkClient;
 import com.tianji.api.client.user.UserClient;
 import com.tianji.api.dto.user.UserDTO;
 import com.tianji.common.autoconfigure.mq.RabbitMqHelper;
 import com.tianji.common.constants.MqConstants;
 import com.tianji.common.domain.dto.PageDTO;
 import com.tianji.common.exceptions.BadRequestException;
-import com.tianji.common.exceptions.BizIllegalException;
 import com.tianji.common.utils.BeanUtils;
 import com.tianji.common.utils.CollUtils;
 import com.tianji.common.utils.UserContext;
@@ -20,147 +22,220 @@ import com.tianji.learning.enums.QuestionStatus;
 import com.tianji.learning.mapper.InteractionReplyMapper;
 import com.tianji.learning.service.IInteractionQuestionService;
 import com.tianji.learning.service.IInteractionReplyService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
+import static com.tianji.common.constants.Constant.DATA_FIELD_NAME_CREATE_TIME;
+import static com.tianji.common.constants.Constant.DATA_FIELD_NAME_LIKED_TIME;
 
 /**
  * <p>
  * 互动问题的回答或评论 服务实现类
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-22
+ * @author 虎哥
  */
 @Service
 @RequiredArgsConstructor
 public class InteractionReplyServiceImpl extends ServiceImpl<InteractionReplyMapper, InteractionReply> implements IInteractionReplyService {
 
-    private final IInteractionQuestionService interactionQuestionService;
+    private final IInteractionQuestionService questionService;
     private final UserClient userClient;
-    private RabbitMqHelper mqHelper;
+    private final RemarkClient remarkClient;
+    private final RabbitMqHelper mqHelper;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void updateReplyOrAnswer(ReplyDTO replyDTO) {
-        // A:hadfihdiuadh?(问题)
-        // B:iahisfh(回答)
-        // C评论B:hdhiash(评论)
-        // answerId：当前回复归属的顶层父级
-        // targetReplyId：标记当前回复直接回复的对象
-
-        // 如果传过来的数据中没有问题id或者没有回复的内容，直接返回
-        if (BeanUtils.isEmpty(replyDTO) || replyDTO.getQuestionId() == null || replyDTO.getContent() == null) {
-            throw new BadRequestException("请求存在问题");
-        }
-        // 根据问题id查询问题，如果问题不存在，直接抛出异常
-        InteractionQuestion question = interactionQuestionService.getById(replyDTO.getQuestionId());
-        if (BeanUtils.isEmpty(question) || question.getHidden()) {
-            // 如果查询不到问题，或问题已被隐藏，抛出异常
-            throw new BadRequestException("问题不存在");
-        }
-        InteractionReply reply = BeanUtils.copyBean(replyDTO, InteractionReply.class);
-        // 设置基本参数
-        Long userId = UserContext.getUser();
+    @Transactional
+    public void saveReply(ReplyDTO replyDTO) {
+        // 1.获取登录用户
+        Long userId = Optional.ofNullable(replyDTO.getUserId()).orElse(UserContext.getUser());
+        // 2.新增回答
+        InteractionReply reply = BeanUtils.toBean(replyDTO, InteractionReply.class);
         reply.setUserId(userId);
-        // 设置评论数量和点赞数量为0   默认值就是0
-        /*reply.setReplyTimes(0);
-        reply.setLikedTimes(0);*/
-        boolean save = save(reply);
-        if (!save) {
-            throw new BizIllegalException("发送评论或回答失败");
-        }
-
-        if (reply.getAnswerId() == null) {
-            // 如果是对问题回答，更新问题的最近回答id和回答次数
-            boolean update = interactionQuestionService.lambdaUpdate()
-                    .set(InteractionQuestion::getLatestAnswerId, reply.getId())
-                    .setSql("answer_times = answer_times + 1")
-                    .eq(InteractionQuestion::getId, reply.getQuestionId())
+        save(reply);
+        // 3.累加评论数或者累加回答数
+        // 3.1.判断当前回复的类型是否是回答
+        boolean isAnswer = replyDTO.getAnswerId() == null;
+        if (!isAnswer) {
+            // 3.2.是评论，则需要更新上级回答的评论数量
+            lambdaUpdate()
+                    .setSql("reply_times = reply_times + 1")
+                    .eq(InteractionReply::getId, replyDTO.getAnswerId())
                     .update();
-            if (!update) {
-                throw new BizIllegalException("更新问题回答失败");
-            }
-            // 如果是学生回答的,发送消息给学生添加积分
-            mqHelper.send(MqConstants.Exchange.LEARNING_EXCHANGE,MqConstants.Key.WRITE_REPLY,userId);
-        }else {
-            // 如果是对回答的评论，更新目标回复的评论次数
-            if (reply.getTargetReplyId() != null) {
-                // 健壮性判断
-                boolean update = lambdaUpdate()
-                        .setSql("reply_times = reply_times + 1")
-                        .eq(InteractionReply::getId,reply.getAnswerId())
-                        .update();
-                if (!update) {
-                    throw new BizIllegalException("更新目标回复评论次数失败");
-                }
-            }
-
         }
-        // 如果是学生的评论，且问题的状态为已查看需要更新问题状态为未查看
-        if (replyDTO.getIsStudent() && question.getStatus() == QuestionStatus.CHECKED) {
-            // 更新问题状态为未查看
-            boolean update = interactionQuestionService.lambdaUpdate()
-                    .set(InteractionQuestion::getStatus, QuestionStatus.UN_CHECK)
-                    .eq(InteractionQuestion::getId, reply.getQuestionId())
-                    .update();
-            if (!update) {
-                throw new BizIllegalException("更新问题状态失败");
-            }
+        // 3.3.尝试更新问题表中的状态、 最近一次回答、回答数量
+        questionService.lambdaUpdate()
+                .set(isAnswer, InteractionQuestion::getLatestAnswerId, reply.getAnswerId())
+                .setSql(isAnswer, "answer_times = answer_times + 1")
+                .set(replyDTO.getIsStudent(), InteractionQuestion::getStatus, QuestionStatus.UN_CHECK.getValue())
+                .eq(InteractionQuestion::getId, replyDTO.getQuestionId())
+                .update();
+
+        // 4.尝试累加积分
+        if (replyDTO.getIsStudent()) {
+            // 学生才需要累加积分
+            mqHelper.send(
+                    MqConstants.Exchange.LEARNING_EXCHANGE,
+                    MqConstants.Key.WRITE_REPLY,
+                    5);
         }
     }
 
     @Override
-    public PageDTO<ReplyVO> queryReplyPage(ReplyPageQuery query) {
-        // 0.判一下query是否为空
-        if (BeanUtils.isEmpty(query)) {
-            throw new BadRequestException("查询参数不能为空");
-        }
-        // 1.问题与回答至少指定一个
-        if (query.getQuestionId() == null && query.getAnswerId() == null) {
-            throw new BadRequestException("问题与回答至少指定一个");
-        }
-        // 2.分页查询
-        Long answerId = query.getAnswerId();
+    public PageDTO<ReplyVO> queryReplyPage(ReplyPageQuery query, boolean forAdmin) {
+        // 1.问题id和回答id至少要有一个，先做参数判断
         Long questionId = query.getQuestionId();
+        Long answerId = query.getAnswerId();
+        if (questionId == null && answerId == null) {
+            throw new BadRequestException("问题或回答id不能都为空");
+        }
+        // 标记当前是查询问题下的回答
+        boolean isQueryAnswer = questionId != null;
+        // 2.分页查询reply
         Page<InteractionReply> page = lambdaQuery()
-                .eq(questionId != null, InteractionReply::getQuestionId, questionId)
-                .eq(answerId != null, InteractionReply::getAnswerId, answerId)
-                .eq(InteractionReply::getHidden, false)
-                .page(query.toMpPageDefaultSortByCreateTimeDesc());
+                .eq(isQueryAnswer, InteractionReply::getQuestionId, questionId)
+                .eq(InteractionReply::getAnswerId, isQueryAnswer ? 0L : answerId)
+                .eq(!forAdmin, InteractionReply::getHidden, false)
+                .page(query.toMpPage( // 先根据点赞数排序，点赞数相同，再按照创建时间排序
+                        OrderItem.desc(DATA_FIELD_NAME_LIKED_TIME),
+                        OrderItem.asc(DATA_FIELD_NAME_CREATE_TIME))
+                );
         List<InteractionReply> records = page.getRecords();
         if (CollUtils.isEmpty(records)) {
             return PageDTO.empty(page);
         }
-        // 如果是根据问题id的分页查询，说明是查询问题下的一级回答
-        // 如果是根据回答id的分页查询，说明是查询回答下的所有评论，这两者都可以按照时间排序
-        List<ReplyVO> voList = new ArrayList<>();
-        for (InteractionReply record : records) {
-            ReplyVO replyVO = BeanUtils.copyBean(record, ReplyVO.class);
-            if (!record.getAnonymity()) {
-                // 如果不是匿名用户，需要获取用户的昵称以及头像
-                UserDTO userDTO = userClient.queryUserById(record.getUserId());
-                replyVO.setUserName(userDTO.getName());
-                replyVO.setUserIcon(userDTO.getIcon());
+        // 3.数据处理，需要查询：提问者信息、回复目标信息、当前用户是否点赞
+        Set<Long> userIds = new HashSet<>();
+        Set<Long> answerIds = new HashSet<>();
+        Set<Long> targetReplyIds = new HashSet<>();
+        // 3.1.获取提问者id 、回复的目标id、当前回答或评论id（统计点赞信息）
+        for (InteractionReply r : records) {
+            if (!r.getAnonymity() || forAdmin) {
+                // 非匿名
+                userIds.add(r.getUserId());
             }
-            if(answerId != null) {
-                // 如果是根据回答id的分页查询
-                InteractionReply targetReply = getById(record.getTargetReplyId());
-                if (targetReply.getAnonymity()) {
-                    // 如果上一级回答的用户是匿名的，那么设置被评论的用户昵称为“匿名用户”
-                    replyVO.setTargetUserName("匿名用户");
-                } else {
-                    UserDTO targetUser = userClient.queryUserById(record.getTargetUserId());
-                    replyVO.setTargetUserName(targetUser.getUsername());
+            targetReplyIds.add(r.getTargetReplyId());
+            answerIds.add(r.getId());
+        }
+        // 3.2.查询目标回复，如果目标回复不是匿名，则需要查询出目标回复的用户信息
+        targetReplyIds.remove(0L);
+        targetReplyIds.remove(null);
+        if (targetReplyIds.size() > 0) {
+            List<InteractionReply> targetReplies = listByIds(targetReplyIds);
+            Set<Long> targetUserIds = targetReplies.stream()
+                    .filter(Predicate.not(InteractionReply::getAnonymity).or(r -> forAdmin))
+                    .map(InteractionReply::getUserId)
+                    .collect(Collectors.toSet());
+            userIds.addAll(targetUserIds);
+        }
+        // 3.3.查询用户
+        Map<Long, UserDTO> userMap = new HashMap<>(userIds.size());
+        if (userIds.size() > 0) {
+            List<UserDTO> users = userClient.queryUserByIds(userIds);
+            userMap = users.stream().collect(Collectors.toMap(UserDTO::getId, u -> u));
+        }
+        // 3.4.查询用户点赞状态
+        Set<Long> bizLiked = remarkClient.isBizLiked(answerIds);
+        // 4.处理VO
+        List<ReplyVO> list = new ArrayList<>(records.size());
+        for (InteractionReply r : records) {
+            // 4.1.拷贝基础属性
+            ReplyVO v = BeanUtils.toBean(r, ReplyVO.class);
+            list.add(v);
+            // 4.2.回复人信息
+            if (!r.getAnonymity() || forAdmin) {
+                UserDTO userDTO = userMap.get(r.getUserId());
+                if (userDTO != null) {
+                    v.setUserIcon(userDTO.getIcon());
+                    v.setUserName(userDTO.getName());
+                    v.setUserType(userDTO.getType());
                 }
             }
-            // 如果是根据问题id的分页查询，不需要被评论的用户昵称，直接添加到voList中即可
-            voList.add(replyVO);
+            // 4.3.如果存在评论的目标，则需要设置目标用户信息
+            if (r.getTargetReplyId() != null) {
+                UserDTO targetUser = userMap.get(r.getTargetUserId());
+                if (targetUser != null) {
+                    v.setTargetUserName(targetUser.getName());
+                }
+            }
+            // 4.4.点赞状态
+            v.setLiked(bizLiked.contains(r.getId()));
         }
-        return PageDTO.of(page, voList);
+        return new PageDTO<>(page.getTotal(), page.getPages(), list);
+    }
+
+    @Override
+    @Transactional
+    public void hiddenReply(Long id, Boolean hidden) {
+        // 1.查询
+        InteractionReply old = getById(id);
+        if (old == null) {
+            return;
+        }
+
+        // 2.隐藏回答
+        InteractionReply reply = new InteractionReply();
+        reply.setId(id);
+        reply.setHidden(hidden);
+        updateById(reply);
+
+        // 3.隐藏评论，先判断是否是回答，回答才需要隐藏下属评论
+        if (old.getAnswerId() != null && old.getAnswerId() != 0) {
+            // 3.1.有answerId，说明自己是评论，无需处理
+            return;
+        }
+        // 3.2.没有answerId，说明自己是回答，需要隐藏回答下的评论
+        lambdaUpdate()
+                .set(InteractionReply::getHidden, hidden)
+                .eq(InteractionReply::getAnswerId, id)
+                .update();
+    }
+
+    @Override
+    public ReplyVO queryReplyById(Long id) {
+        // 1.根据id查询
+        InteractionReply r = getById(id);
+        // 2.数据处理，需要查询用户信息、评论目标信息、当前用户是否点赞
+        Set<Long> userIds = new HashSet<>();
+        // 2.1.获取用户 id
+        userIds.add(r.getUserId());
+        // 2.2.查询评论目标，如果评论目标不是匿名，则需要查询出目标回复的用户id
+        if (r.getTargetReplyId() != null && r.getTargetReplyId() != 0) {
+            InteractionReply target = getById(r.getTargetReplyId());
+            if (!target.getAnonymity()) {
+                userIds.add(target.getUserId());
+            }
+        }
+        // 2.3.查询用户详细
+        Map<Long, UserDTO> userMap = new HashMap<>(userIds.size());
+        if (userIds.size() > 0) {
+            List<UserDTO> users = userClient.queryUserByIds(userIds);
+            userMap = users.stream().collect(Collectors.toMap(UserDTO::getId, u -> u));
+        }
+        // 2.4.查询用户点赞状态
+        Set<Long> bizLiked = remarkClient.isBizLiked(CollUtils.singletonList(id));
+        // 4.处理VO
+        // 4.1.拷贝基础属性
+        ReplyVO v = BeanUtils.toBean(r, ReplyVO.class);
+        // 4.2.回复人信息
+        UserDTO userDTO = userMap.get(r.getUserId());
+        if (userDTO != null) {
+            v.setUserIcon(userDTO.getIcon());
+            v.setUserName(userDTO.getName());
+            v.setUserType(userDTO.getType());
+        }
+        // 4.3.目标用户
+        UserDTO targetUser = userMap.get(r.getTargetUserId());
+        if (targetUser != null) {
+            v.setTargetUserName(targetUser.getName());
+        }
+        // 4.4.点赞状态
+        v.setLiked(bizLiked.contains(id));
+        return v;
     }
 }

@@ -8,8 +8,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
  *  Mapper 接口
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-24
+ * @author 虎哥
  */
 public interface PointsBoardSeasonMapper extends BaseMapper<PointsBoardSeason> {
 

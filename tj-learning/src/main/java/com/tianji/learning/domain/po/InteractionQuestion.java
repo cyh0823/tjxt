@@ -1,23 +1,22 @@
 package com.tianji.learning.domain.po;
 
-import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
-import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableId;
-import java.io.Serializable;
-
+import com.baomidou.mybatisplus.annotation.TableName;
 import com.tianji.learning.enums.QuestionStatus;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
+
+import java.io.Serializable;
+import java.time.LocalDateTime;
 
 /**
  * <p>
  * 互动提问的问题表
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-22
+ * @author 虎哥
  */
 @Data
 @EqualsAndHashCode(callSuper = false)

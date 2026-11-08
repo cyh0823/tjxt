@@ -1,8 +1,8 @@
 package com.tianji.learning.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.tianji.api.cache.CategoryCache;
 import com.tianji.api.client.course.CatalogueClient;
 import com.tianji.api.client.course.CourseClient;
@@ -28,7 +28,7 @@ import com.tianji.learning.domain.vo.QuestionVO;
 import com.tianji.learning.mapper.InteractionQuestionMapper;
 import com.tianji.learning.mapper.InteractionReplyMapper;
 import com.tianji.learning.service.IInteractionQuestionService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.tianji.learning.service.IInteractionReplyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,8 +42,7 @@ import java.util.stream.Collectors;
  * 互动提问的问题表 服务实现类
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-22
+ * @author 虎哥
  */
 @Service
 @RequiredArgsConstructor
@@ -57,256 +56,299 @@ public class InteractionQuestionServiceImpl extends ServiceImpl<InteractionQuest
     private final CategoryCache categoryCache;
 
     @Override
-    public void saveQuestion(QuestionFormDTO questionDTO) {
+    public InteractionQuestion saveQuestion(QuestionFormDTO questionDTO) {
+        // 1.获取当前登录的用户id
         Long userId = UserContext.getUser();
-        InteractionQuestion interactionQuestion = BeanUtils.copyProperties(questionDTO, InteractionQuestion.class);
-        interactionQuestion.setUserId(userId);
-        save(interactionQuestion);
+        // 2.数据封装
+        InteractionQuestion question = BeanUtils.copyBean(questionDTO, InteractionQuestion.class);
+        question.setUserId(userId);
+        // 3.写入数据库
+        save(question);
+        return question;
     }
 
     @Override
-    public PageDTO<QuestionVO> queryPageQuestion(QuestionPageQuery pageQuery) {
-        Long courseId = pageQuery.getCourseId();
-        Long sectionId = pageQuery.getSectionId();
+    public PageDTO<QuestionVO> queryQuestionPage(QuestionPageQuery query) {
+        // 1.参数校验，课程id和小节id不能都为空
+        Long courseId = query.getCourseId();
+        Long sectionId = query.getSectionId();
         if (courseId == null && sectionId == null) {
-            throw new BadRequestException("查询的小节数和课程不能同时为空");
+            throw new BadRequestException("课程id和小节id不能都为空");
         }
+        // 2.分页查询
         Page<InteractionQuestion> page = lambdaQuery()
-                .select(info -> !info.getProperty().equals("description"))
-                .eq(pageQuery.getOnlyMine(), InteractionQuestion::getUserId, UserContext.getUser())
+                .select(InteractionQuestion.class, info -> !info.getProperty().equals("description"))
+                .eq(query.getOnlyMine(), InteractionQuestion::getUserId, UserContext.getUser())
                 .eq(courseId != null, InteractionQuestion::getCourseId, courseId)
                 .eq(sectionId != null, InteractionQuestion::getSectionId, sectionId)
                 .eq(InteractionQuestion::getHidden, false)
-                .page(pageQuery.toMpPageDefaultSortByCreateTimeDesc());
+                .page(query.toMpPageDefaultSortByCreateTimeDesc());
         List<InteractionQuestion> records = page.getRecords();
         if (CollUtils.isEmpty(records)) {
             return PageDTO.empty(page);
         }
-
-        // 根据Id查询提问者和最近一次的回答者
+        // 3.根据id查询提问者和最近一次回答的信息
         Set<Long> userIds = new HashSet<>();
         Set<Long> answerIds = new HashSet<>();
+        // 3.1.得到问题当中的提问者id和最近一次回答的id
         for (InteractionQuestion q : records) {
-            if (!q.getAnonymity()) {
+            if(!q.getAnonymity()) { // 只查询非匿名的问题
                 userIds.add(q.getUserId());
             }
             answerIds.add(q.getLatestAnswerId());
         }
-        // 根据Id查询最近一次回答
+        // 3.2.根据id查询最近一次回答
         answerIds.remove(null);
         Map<Long, InteractionReply> replyMap = new HashMap<>(answerIds.size());
-        if (CollUtils.isNotEmpty(answerIds)) {
+        if(CollUtils.isNotEmpty(answerIds)) {
             List<InteractionReply> replies = replyMapper.selectBatchIds(answerIds);
             for (InteractionReply reply : replies) {
                 replyMap.put(reply.getId(), reply);
-                // 在查询回复者时，可以将非匿名的回复者id也加入到查询列表中，方便后续查询用户信息
-                if (!reply.getAnonymity()) {
+                if(!reply.getAnonymity()){
                     userIds.add(reply.getUserId());
                 }
             }
         }
-        // 根据id查询用户信息
+
+        // 3.3.根据id查询用户信息（提问者）
         userIds.remove(null);
         Map<Long, UserDTO> userMap = new HashMap<>(userIds.size());
         if(CollUtils.isNotEmpty(userIds)) {
-            List<UserDTO> userDTOS = userClient.queryUserByIds(userIds);
-            userMap = userDTOS.stream().collect(Collectors.toMap(UserDTO::getId, u -> u));
+            List<UserDTO> users = userClient.queryUserByIds(userIds);
+            userMap = users.stream()
+                    .collect(Collectors.toMap(UserDTO::getId, u -> u));
         }
-        // 封装为VO
+
+        // 4.封装VO
         List<QuestionVO> voList = new ArrayList<>(records.size());
         for (InteractionQuestion r : records) {
+            // 4.1.将PO转为VO
             QuestionVO vo = BeanUtils.copyBean(r, QuestionVO.class);
-            // 如果用户是匿名的，就不查询用户信息了
-            if (!r.getAnonymity()) {
+            voList.add(vo);
+            // 4.2.封装提问者信息
+            if(!r.getAnonymity()){
                 UserDTO userDTO = userMap.get(r.getUserId());
                 if (userDTO != null) {
-                    vo.setUserIcon(userDTO.getIcon());
                     vo.setUserName(userDTO.getName());
+                    vo.setUserIcon(userDTO.getIcon());
                 }
             }
-            InteractionReply interactionReply = replyMap.get(r.getLatestAnswerId());
-            if (interactionReply != null) {
-                vo.setLatestReplyContent(interactionReply.getContent());
-                // 如果回答者是匿名的，同样不用查询回答者的姓名（前面在将回答者添加到UserMap中已经判断是否匿名了）
-                if (!interactionReply.getAnonymity()) {
-                    vo.setLatestReplyUser(userMap.get(interactionReply.getUserId()).getName());
+
+            // 4.3.封装最近一次回答的信息
+            InteractionReply reply = replyMap.get(r.getLatestAnswerId());
+            if (reply != null) {
+                vo.setLatestReplyContent(reply.getContent());
+                if(!reply.getAnonymity()){
+                    UserDTO user = userMap.get(reply.getUserId());
+                    vo.setLatestReplyUser(user.getName());
                 }
+
             }
-            voList.add(vo);
         }
-        return PageDTO.of(page,voList);
+
+        return PageDTO.of(page, voList);
     }
 
     @Override
     public QuestionVO queryQuestionById(Long id) {
+        // 1.根据id查询数据
         InteractionQuestion question = getById(id);
-        if(question == null || question.getHidden()) {
+        // 2.数据校验
+        if(question == null || question.getHidden()){
+            // 没有数据或者是被隐藏了
             return null;
         }
-        UserDTO userDTO = new UserDTO();
-        if(!question.getAnonymity()) {
-            userDTO = userClient.queryUserById(question.getUserId());
+        // 3.查询提问者信息
+        UserDTO user = null;
+        if(!question.getAnonymity()){
+            user = userClient.queryUserById(question.getUserId());
         }
+        // 4.封装VO
         QuestionVO vo = BeanUtils.copyBean(question, QuestionVO.class);
-        if (userDTO != null) {
-            vo.setUserName(userDTO.getName());
-            vo.setUserIcon(userDTO.getIcon());
+        if (user != null) {
+            vo.setUserName(user.getName());
+            vo.setUserIcon(user.getIcon());
         }
         return vo;
     }
 
     @Override
-    public PageDTO<QuestionAdminVO> queryPageAdminQuestion(QuestionAdminPageQuery pageQuery) {
+    public PageDTO<QuestionAdminVO> queryQuestionPageAdmin(QuestionAdminPageQuery query) {
+        // 1.处理课程名称，得到课程id
         List<Long> courseIds = null;
-        if (!StringUtils.isBlank(pageQuery.getCourseName())) {
-            courseIds = searchClient.queryCoursesIdByName(pageQuery.getCourseName());
+        if (StringUtils.isNotBlank(query.getCourseName())) {
+            courseIds = searchClient.queryCoursesIdByName(query.getCourseName());
             if (CollUtils.isEmpty(courseIds)) {
-                return PageDTO.empty(0L,0L);
+                return PageDTO.empty(0L, 0L);
             }
         }
-        Integer status = pageQuery.getStatus();
-        LocalDateTime begin = pageQuery.getBeginTime();
-        LocalDateTime end = pageQuery.getEndTime();
+        // 2.分页查询
+        Integer status = query.getStatus();
+        LocalDateTime begin = query.getBeginTime();
+        LocalDateTime end = query.getEndTime();
         Page<InteractionQuestion> page = lambdaQuery()
                 .in(courseIds != null, InteractionQuestion::getCourseId, courseIds)
                 .eq(status != null, InteractionQuestion::getStatus, status)
                 .gt(begin != null, InteractionQuestion::getCreateTime, begin)
                 .lt(end != null, InteractionQuestion::getCreateTime, end)
-                .page(pageQuery.toMpPageDefaultSortByCreateTimeDesc());
+                .page(query.toMpPageDefaultSortByCreateTimeDesc());
         List<InteractionQuestion> records = page.getRecords();
-        if(CollUtils.isEmpty(records)) {
+        if (CollUtils.isEmpty(records)) {
             return PageDTO.empty(page);
         }
+
+        // 3.准备VO需要的数据：用户数据、课程数据、章节数据
         Set<Long> userIds = new HashSet<>();
         Set<Long> cIds = new HashSet<>();
         Set<Long> cataIds = new HashSet<>();
-        for (InteractionQuestion record : records) {
-            userIds.add(record.getUserId());
-            cIds.add(record.getSectionId());
-            cataIds.add(record.getSectionId());
-            cataIds.add(record.getChapterId());
+        // 3.1.获取各种数据的id集合
+        for (InteractionQuestion q : records) {
+            userIds.add(q.getUserId());
+            cIds.add(q.getCourseId());
+            cataIds.add(q.getChapterId());
+            cataIds.add(q.getSectionId());
+        }
+        // 3.2.根据id查询用户
+        List<UserDTO> users = userClient.queryUserByIds(userIds);
+        Map<Long, UserDTO> userMap = new HashMap<>(users.size());
+        if (CollUtils.isNotEmpty(users)) {
+            userMap = users.stream().collect(Collectors.toMap(UserDTO::getId, u -> u));
         }
 
-        List<UserDTO> userDTOS = userClient.queryUserByIds(userIds);
-        Map<Long, UserDTO> userMap = new HashMap<>(userDTOS.size());
-        if(CollUtils.isNotEmpty(userDTOS)){
-            userMap = userDTOS.stream().collect(Collectors.toMap(UserDTO::getId, u -> u));
+        // 3.3.根据id查询课程
+        List<CourseSimpleInfoDTO> cInfos = courseClient.getSimpleInfoList(cIds);
+        Map<Long, CourseSimpleInfoDTO> cInfoMap = new HashMap<>(cInfos.size());
+        if (CollUtils.isNotEmpty(cInfos)) {
+            cInfoMap = cInfos.stream().collect(Collectors.toMap(CourseSimpleInfoDTO::getId, c -> c));
         }
 
-        List<CourseSimpleInfoDTO> simpleInfoList = courseClient.getSimpleInfoList(cIds);
-        Map<Long, CourseSimpleInfoDTO> courseMap = new HashMap<>(simpleInfoList.size());
-        if(CollUtils.isNotEmpty(simpleInfoList)) {
-            courseMap = simpleInfoList.stream().collect(Collectors.toMap(CourseSimpleInfoDTO::getId, c -> c));
+        // 3.4.根据id查询章节
+        List<CataSimpleInfoDTO> catas = catalogueClient.batchQueryCatalogue(cataIds);
+        Map<Long, String> cataMap = new HashMap<>(catas.size());
+        if (CollUtils.isNotEmpty(catas)) {
+            cataMap = catas.stream()
+                    .collect(Collectors.toMap(CataSimpleInfoDTO::getId, CataSimpleInfoDTO::getName));
         }
 
-        List<CataSimpleInfoDTO> cInfos = catalogueClient.batchQueryCatalogue(cataIds);
-        Map<Long, String> cataMap = new HashMap<>(cInfos.size());
-        if(CollUtils.isNotEmpty(cInfos)) {
-            cataMap = cInfos.stream().collect(Collectors.toMap(CataSimpleInfoDTO::getId, CataSimpleInfoDTO::getName));
-        }
 
+        // 4.封装VO
         List<QuestionAdminVO> voList = new ArrayList<>(records.size());
-        for (InteractionQuestion record : records) {
-            QuestionAdminVO vo = BeanUtils.copyBean(record, QuestionAdminVO.class);
+        for (InteractionQuestion q : records) {
+            // 4.1.将PO转VO，属性拷贝
+            QuestionAdminVO vo = BeanUtils.copyBean(q, QuestionAdminVO.class);
             voList.add(vo);
-            UserDTO user = userMap.get(record.getUserId());
-            if (BeanUtils.isNotEmpty(user)) {
-                vo.setUserName(userMap.get(record.getUserId()).getName());
-                vo.setUserIcon(userMap.get(record.getUserId()).getIcon());
+            // 4.2.用户信息
+            UserDTO user = userMap.get(q.getUserId());
+            if (user != null) {
+                vo.setUserName(user.getName());
             }
-
-            CourseSimpleInfoDTO cInfo = courseMap.get(record.getCourseId());
-            if (BeanUtils.isNotEmpty(cInfo)) {
+            // 4.3.课程信息以及分类信息
+            CourseSimpleInfoDTO cInfo = cInfoMap.get(q.getCourseId());
+            if (cInfo != null) {
                 vo.setCourseName(cInfo.getName());
                 vo.setCategoryName(categoryCache.getCategoryNames(cInfo.getCategoryIds()));
             }
-
-            vo.setChapterName(cataMap.getOrDefault(record.getChapterId(), ""));
-            vo.setSectionName(cataMap.getOrDefault(record.getSectionId(), ""));
-
+            // 4.4.章节信息
+            vo.setChapterName(cataMap.getOrDefault(q.getChapterId(), ""));
+            vo.setSectionName(cataMap.getOrDefault(q.getSectionId(), ""));
         }
-
-        return PageDTO.of(page,voList);
+        return PageDTO.of(page, voList);
     }
 
     @Override
-    public QuestionAdminVO queryAdminQuestionById(Long id) {
+    public QuestionAdminVO queryQuestionByIdAdmin(Long id) {
+        // 1.根据id查询问题
         InteractionQuestion question = getById(id);
-        if (BeanUtils.isEmpty(question)) {
+        if (question == null) {
             return null;
         }
-        UserDTO userDTO = userClient.queryUserById(question.getUserId());
-        CourseFullInfoDTO courseDTO = courseClient.getCourseInfoById(question.getCourseId(), true, true);
-        CataSimpleInfoDTO chapterInfo = catalogueClient.batchQueryCatalogue(CollUtils.toList(question.getChapterId())).get(0);
-        CataSimpleInfoDTO sectionInfo = catalogueClient.batchQueryCatalogue(CollUtils.toList(question.getSectionId())).get(0);
+        // 2.转PO为VO
         QuestionAdminVO vo = BeanUtils.copyBean(question, QuestionAdminVO.class);
-        if (vo.getStatus() == 0) {
-            vo.setStatus(1);
+        // 3.查询提问者信息
+        UserDTO user = userClient.queryUserById(question.getUserId());
+        if (user != null) {
+            vo.setUserName(user.getName());
+            vo.setUserIcon(user.getIcon());
         }
-        if (BeanUtils.isNotEmpty(userDTO)) {
-            vo.setUserName(userDTO.getName());
-            vo.setUserIcon(userDTO.getIcon());
+        // 4.查询课程信息
+        CourseFullInfoDTO cInfo = courseClient.getCourseInfoById(
+                question.getCourseId(), false, true);
+        if (cInfo != null) {
+            // 4.1.课程名称信息
+            vo.setCourseName(cInfo.getName());
+            // 4.2.分类信息
+            vo.setCategoryName(categoryCache.getCategoryNames(cInfo.getCategoryIds()));
+            // 4.3.教师信息
+            List<Long> teacherIds = cInfo.getTeacherIds();
+            List<UserDTO> teachers = userClient.queryUserByIds(teacherIds);
+            if(CollUtils.isNotEmpty(teachers)) {
+                vo.setTeacherName(teachers.stream()
+                        .map(UserDTO::getName).collect(Collectors.joining("/")));
+            }
         }
-        if (BeanUtils.isNotEmpty(courseDTO)) {
-            vo.setCourseName(courseDTO.getName());
-            // 将老师集合处理成字符串，中间使用、隔开
-            String teacherName = userClient
-                    .queryUserByIds(courseDTO.getTeacherIds())
-                    .stream().map(UserDTO::getName).collect(Collectors.joining("、"));
-            vo.setTeacherName(teacherName);
-            vo.setCategoryName(categoryCache.getCategoryNames(courseDTO.getCategoryIds()));
+        // 5.查询章节信息
+        List<CataSimpleInfoDTO> catas = catalogueClient.batchQueryCatalogue(
+                List.of(question.getChapterId(), question.getSectionId()));
+        Map<Long, String> cataMap = new HashMap<>(catas.size());
+        if (CollUtils.isNotEmpty(catas)) {
+            cataMap = catas.stream()
+                    .collect(Collectors.toMap(CataSimpleInfoDTO::getId, CataSimpleInfoDTO::getName));
         }
-        if (BeanUtils.isNotEmpty(chapterInfo)) {
-            vo.setChapterName(chapterInfo.getName());
-        }
-        if (BeanUtils.isNotEmpty(sectionInfo)) {
-            vo.setSectionName(sectionInfo.getName());
-        }
+        vo.setChapterName(cataMap.getOrDefault(question.getChapterId(), ""));
+        vo.setSectionName(cataMap.getOrDefault(question.getSectionId(), ""));
+        // 6.封装VO
         return vo;
     }
 
     @Override
-    public void updateQuestion(Long id, QuestionFormDTO question) {
-        if (id == null || question == null) {
-            throw new IllegalArgumentException("问题ID或更新参数不能为空");
-        }
-        InteractionQuestion interactionQuestion = BeanUtils.copyBean(question, InteractionQuestion.class);
-        interactionQuestion.setId(id);
-        boolean b = updateById(interactionQuestion);
-        if (!b) {
-            throw new IllegalArgumentException("问题不存在，更新失败");
-        }
+    public void hiddenQuestion(Long id, Boolean hidden) {
+        // 1.更新问题
+        InteractionQuestion question = new InteractionQuestion();
+        question.setId(id);
+        question.setHidden(hidden);
+        updateById(question);
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void removeQuestionById(Long id) {
-        InteractionQuestion question = getById(id);
-        if (BeanUtils.isEmpty(question)) {
+    public void updateQuestion(Long id, QuestionFormDTO questionDTO) {
+        // 1.获取当前登录用户
+        Long userId = UserContext.getUser();
+        // 2.查询当前问题
+        InteractionQuestion q = getById(id);
+        if (q == null) {
             throw new BadRequestException("问题不存在");
         }
-        Long userId = UserContext.getUser();
-        if (!Objects.equals(userId,question.getUserId())) {
-            throw new IllegalArgumentException("您没有权限删除该问题");
+        // 3.判断是否是当前用户的问题
+        if (!q.getUserId().equals(userId)) {
+            // 不是，抛出异常
+            throw new BadRequestException("无权修改他人的问题");
         }
-        // 删除问题下的所有回答和评论
-        replyMapper.delete(new LambdaQueryWrapper<InteractionReply>()
-                .eq(question.getId() != null,InteractionReply::getQuestionId , question.getId()));
-        // 删除问题
-        boolean questionDeleted = removeById(id);
-        if (!questionDeleted) {
-            throw new RuntimeException("删除回答失败");
-        }
+        // 4.修改问题
+        InteractionQuestion question = BeanUtils.toBean(questionDTO, InteractionQuestion.class);
+        question.setId(id);
+        updateById(question);
     }
 
     @Override
-    public void updateHidden(Long id, Boolean hidden) {
-        boolean update = lambdaUpdate()
-                .set(InteractionQuestion::getHidden, hidden)
-                .eq(InteractionQuestion::getId, id)
-                .update();
-        if (!update) {
-            throw new BadRequestException("更新失败");
+    @Transactional
+    public void deleteById(Long id) {
+        // 1.获取当前登录用户
+        Long userId = UserContext.getUser();
+        // 2.查询当前问题
+        InteractionQuestion q = getById(id);
+        if (q == null) {
+            return;
         }
+        // 3.判断是否是当前用户的问题
+        if (!q.getUserId().equals(userId)) {
+            // 不是，抛出异常
+            throw new BadRequestException("无权删除他人的问题");
+        }
+        // 4.删除问题
+        removeById(id);
+        // 5.删除答案
+        replyMapper.delete(
+                new QueryWrapper<InteractionReply>().lambda().eq(InteractionReply::getQuestionId, id)
+        );
     }
 }

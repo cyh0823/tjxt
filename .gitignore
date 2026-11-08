@@ -15,3 +15,6 @@ target
 .project
 logs
 job
+
+templates
+API-key.txt
