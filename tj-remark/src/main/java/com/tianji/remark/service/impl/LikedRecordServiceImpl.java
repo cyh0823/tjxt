@@ -1,34 +1,33 @@
 package com.tianji.remark.service.impl;
 
+import cn.hutool.core.convert.Convert;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper;
-import com.tianji.api.dto.remark.LikeTimesDto;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.tianji.api.dto.remark.LikedTimesDTO;
 import com.tianji.common.autoconfigure.mq.RabbitMqHelper;
-import com.tianji.common.constants.MqConstants;
-import com.tianji.common.utils.BeanUtils;
 import com.tianji.common.utils.StringUtils;
 import com.tianji.common.utils.UserContext;
 import com.tianji.remark.domain.dto.LikeRecordFormDTO;
 import com.tianji.remark.domain.po.LikedRecord;
 import com.tianji.remark.mapper.LikedRecordMapper;
 import com.tianji.remark.service.ILikedRecordService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import static com.tianji.common.constants.MqConstants.Exchange.LIKE_RECORD_EXCHANGE;
+import static com.tianji.common.constants.MqConstants.Key.LIKED_TIMES_KEY_TEMPLATE;
 
 /**
  * <p>
  * 点赞记录表 服务实现类
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-23
+ * @author 虎哥
  */
-//@Service
+// @Service
 @RequiredArgsConstructor
 public class LikedRecordServiceImpl extends ServiceImpl<LikedRecordMapper, LikedRecord> implements ILikedRecordService {
 
@@ -36,53 +35,64 @@ public class LikedRecordServiceImpl extends ServiceImpl<LikedRecordMapper, Liked
 
     @Override
     public void addLikeRecord(LikeRecordFormDTO recordDTO) {
-        // 判断是点赞还是取消点赞
-        boolean success = recordDTO.getLiked() ? like(recordDTO) : unLike(recordDTO);
-        if(!success) {
+        // 1.基于前端的参数，判断是执行点赞还是取消点赞
+        boolean success = recordDTO.getLiked() ? like(recordDTO) : unlike(recordDTO);
+        // 2.判断是否执行成功，如果失败，则直接结束
+        if (!success) {
             return;
         }
-        // 统计点赞数量
-        Integer count = lambdaQuery().eq(LikedRecord::getBizId,recordDTO.getBizId()).count();
-        // 通过MQ异步发送点赞数量
-        mqHelper.send(MqConstants.Exchange.LIKE_RECORD_EXCHANGE,
-                StringUtils.format(MqConstants.Key.LIKED_TIMES_KEY_TEMPLATE,recordDTO.getBizType())
-                , LikeTimesDto.of(recordDTO.getBizId(), count));
+        // 3.如果执行成功，统计点赞总数
+        Long likedTimes = lambdaQuery()
+                .eq(LikedRecord::getBizId, recordDTO.getBizId())
+                .count();
+        // 4.发送MQ通知
+        mqHelper.send(
+                LIKE_RECORD_EXCHANGE,
+                StringUtils.format(LIKED_TIMES_KEY_TEMPLATE, recordDTO.getBizType()),
+                LikedTimesDTO.of(recordDTO.getBizId(), Convert.toInt(likedTimes)));
     }
 
     @Override
     public Set<Long> isBizLiked(List<Long> bizIds) {
-        List<LikedRecord> list = lambdaQuery().in(LikedRecord::getBizId, bizIds).eq(LikedRecord::getUserId, UserContext.getUser()).list();
+        // 1.获取登录用户id
+        Long userId = UserContext.getUser();
+        // 2.查询点赞状态
+        List<LikedRecord> list = lambdaQuery()
+                .in(LikedRecord::getBizId, bizIds)
+                .eq(LikedRecord::getUserId, userId)
+                .list();
+        // 3.返回结果
         return list.stream().map(LikedRecord::getBizId).collect(Collectors.toSet());
     }
 
     @Override
-    public void readLikedTimesAndSendMessage(String bizType, int bizMaxNum) {
+    public void readLikedTimesAndSendMessage(String bizType, int maxBizSize) {
 
     }
 
-    private boolean unLike(LikeRecordFormDTO recordDTO) {
-        // 删除点赞记录
+    private boolean unlike(LikeRecordFormDTO recordDTO) {
         return remove(new QueryWrapper<LikedRecord>().lambda()
                 .eq(LikedRecord::getUserId, UserContext.getUser())
                 .eq(LikedRecord::getBizId, recordDTO.getBizId()));
     }
 
     private boolean like(LikeRecordFormDTO recordDTO) {
-        // 查询是否已经存在点赞记录
         Long userId = UserContext.getUser();
-        Integer count = lambdaQuery()
+        // 1.查询点赞记录
+        Long count = lambdaQuery()
                 .eq(LikedRecord::getUserId, userId)
                 .eq(LikedRecord::getBizId, recordDTO.getBizId())
                 .count();
+        // 2.判断是否存在，如果已经存在，直接结束
         if (count > 0) {
             return false;
         }
-        // 保存点赞记录
-        LikedRecord likedRecord = new LikedRecord();
-        likedRecord.setUserId(userId);
-        likedRecord.setBizId(recordDTO.getBizId());
-        likedRecord.setBizType(recordDTO.getBizType());
-        save(likedRecord);
+        // 3.如果不存在，直接新增
+        LikedRecord r = new LikedRecord();
+        r.setUserId(userId);
+        r.setBizId(recordDTO.getBizId());
+        r.setBizType(recordDTO.getBizType());
+        save(r);
         return true;
     }
 }

@@ -1,23 +1,21 @@
 package com.tianji.remark.domain.po;
 
-import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
-import java.time.LocalDateTime;
-import java.io.Serializable;
-
-import lombok.AllArgsConstructor;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
+
+import java.io.Serializable;
+import java.time.LocalDateTime;
 
 /**
  * <p>
  * 点赞记录表
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-23
+ * @author 虎哥
  */
 @Data
 @EqualsAndHashCode(callSuper = false)

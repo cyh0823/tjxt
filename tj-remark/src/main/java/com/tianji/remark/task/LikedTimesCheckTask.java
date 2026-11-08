@@ -11,15 +11,15 @@ import java.util.List;
 @RequiredArgsConstructor
 public class LikedTimesCheckTask {
 
-    private static List<String> BIZ_TYPES = List.of("QA","NOTE");
-    private static int BIZ_MAX_NUM = 50;   // 每次最多处理50条数据
+    private static final List<String> BIZ_TYPES = List.of("QA", "NOTE");
+    private static final int MAX_BIZ_SIZE = 30;
 
     private final ILikedRecordService recordService;
 
     @Scheduled(fixedDelay = 20000)
-    public void checkLikedTimes() {
+    public void checkLikedTimes(){
         for (String bizType : BIZ_TYPES) {
-            recordService.readLikedTimesAndSendMessage(bizType,BIZ_MAX_NUM);
+            recordService.readLikedTimesAndSendMessage(bizType, MAX_BIZ_SIZE);
         }
     }
 }

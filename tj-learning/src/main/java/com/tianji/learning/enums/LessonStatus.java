@@ -13,8 +13,8 @@ public enum LessonStatus implements BaseEnum {
     FINISHED(2, "已学完"),
     EXPIRED(3, "已过期"),
     ;
-    @JsonValue  // 返回给前端的值
-    @EnumValue  // MP在操作数据库时，往数据库中增删改查的值
+    @JsonValue
+    @EnumValue
     int value;
     String desc;
 
@@ -23,7 +23,7 @@ public enum LessonStatus implements BaseEnum {
         this.desc = desc;
     }
 
-    @JsonCreator(mode = JsonCreator.Mode.DELEGATING) // 对前端提交的数据进行一个转化
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     public static LessonStatus of(Integer value){
         if (value == null) {
             return null;

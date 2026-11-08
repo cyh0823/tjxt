@@ -8,8 +8,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
  * 兑换码 Mapper 接口
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-27
+ * @author 虎哥
  */
 public interface ExchangeCodeMapper extends BaseMapper<ExchangeCode> {
 

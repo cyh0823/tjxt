@@ -1,5 +1,6 @@
 package com.tianji.trade.service.impl;
 
+import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -8,6 +9,7 @@ import com.tianji.api.client.promotion.PromotionClient;
 import com.tianji.api.constants.CourseStatus;
 import com.tianji.api.dto.course.CourseSimpleInfoDTO;
 import com.tianji.api.dto.promotion.CouponDiscountDTO;
+import com.tianji.api.dto.promotion.OrderCouponDTO;
 import com.tianji.api.dto.promotion.OrderCourseDTO;
 import com.tianji.api.dto.trade.OrderBasicDTO;
 import com.tianji.common.autoconfigure.mq.RabbitMqHelper;
@@ -21,6 +23,7 @@ import com.tianji.common.utils.CollUtils;
 import com.tianji.common.utils.UserContext;
 import com.tianji.pay.sdk.dto.PayResultDTO;
 import com.tianji.trade.config.TradeProperties;
+import com.tianji.trade.constants.OrderCancelReason;
 import com.tianji.trade.constants.OrderStatus;
 import com.tianji.trade.constants.RefundStatus;
 import com.tianji.trade.constants.TradeErrorInfo;
@@ -34,6 +37,7 @@ import com.tianji.trade.service.ICartService;
 import com.tianji.trade.service.IOrderDetailService;
 import com.tianji.trade.service.IOrderService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,7 +45,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static com.tianji.common.constants.ErrorInfo.Msg.OPERATE_FAILED;
@@ -80,6 +83,20 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 .map(CourseSimpleInfoDTO::getPrice).reduce(Integer::sum).orElse(0);
         // 2.2.计算优惠金额
         order.setDiscountAmount(0);
+        // 删除null的优惠券id，如果存在的话
+        CollUtil.removeNull(placeOrderDTO.getCouponIds());
+        List<Long> couponIds = placeOrderDTO.getCouponIds();
+        CouponDiscountDTO discount = null;
+        if (CollUtils.isNotEmpty(couponIds)) {
+            List<OrderCourseDTO> orderCourses = courseInfos.stream()
+                    .map(c -> new OrderCourseDTO().setId(c.getId()).setCateId(c.getThirdCateId()).setPrice(c.getPrice()))
+                    .collect(Collectors.toList());
+            discount = promotionClient.queryDiscountDetailByOrder(new OrderCouponDTO(couponIds, orderCourses));
+            if (discount != null) {
+                order.setDiscountAmount(discount.getDiscountAmount());
+                order.setCouponIds(discount.getIds());
+            }
+        }
         Integer realAmount = totalAmount - order.getDiscountAmount();
         // 2.3.封装其它信息
         order.setUserId(userId);
@@ -94,16 +111,27 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 3.封装订单详情
         List<OrderDetail> orderDetails = new ArrayList<>(courseInfos.size());
         for (CourseSimpleInfoDTO courseInfo : courseInfos) {
-            orderDetails.add(packageOrderDetail(courseInfo, order));
+            Integer discountValue = discount == null ?
+                    0 : discount.getDiscountDetail().getOrDefault(courseInfo.getId(), 0);
+            orderDetails.add(packageOrderDetail(courseInfo, order, discountValue));
         }
 
         // 4.写入数据库
-        saveOrderAndDetails(order, orderDetails);
+        try {
+            saveOrderAndDetails(order, orderDetails);
+        } catch (DuplicateKeyException e) {
+            throw new DbException(TradeErrorInfo.DUPLICATE_ORDER_FAILED);
+        }
 
         // 5.删除购物车数据
         cartService.deleteCartByUserAndCourseIds(userId, placeOrderDTO.getCourseIds());
 
-        // 6.构建下单结果
+        // 6.核销优惠券
+        if (CollUtil.isNotEmpty(couponIds)) {
+            promotionClient.writeOffCoupon(couponIds);
+        }
+
+        // 7.构建下单结果
         return PlaceOrderResultVO.builder()
                 .orderId(orderId)
                 .payAmount(realAmount)
@@ -119,11 +147,11 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 2.判断状态
         for (CourseSimpleInfoDTO courseInfo : courseInfos) {
             // 2.1.检查课程是否上架
-            if(!CourseStatus.SHELF.equalsValue(courseInfo.getStatus())){
+            if (!CourseStatus.SHELF.equalsValue(courseInfo.getStatus())) {
                 throw new BizIllegalException(TradeErrorInfo.COURSE_NOT_FOR_SALE);
             }
             // 2.2.检查课程是否过期
-            if(courseInfo.getPurchaseEndTime().isBefore(now)){
+            if (courseInfo.getPurchaseEndTime().isBefore(now)) {
                 throw new BizIllegalException(TradeErrorInfo.COURSE_EXPIRED);
             }
         }
@@ -143,7 +171,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BizIllegalException(TradeErrorInfo.COURSE_NOT_EXISTS);
         }
         CourseSimpleInfoDTO courseInfo = courseInfos.get(0);
-        if(!courseInfo.getFree()){
+        if (!courseInfo.getFree()) {
             // 非免费课程，直接报错
             throw new BizIllegalException(TradeErrorInfo.COURSE_NOT_FREE);
         }
@@ -162,10 +190,14 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         order.setId(orderId);
 
         // 3.订单详情
-        OrderDetail detail = packageOrderDetail(courseInfo, order);
+        OrderDetail detail = packageOrderDetail(courseInfo, order, 0);
 
         // 4.写入数据库
-        saveOrderAndDetails(order, CollUtils.singletonList(detail));
+        try {
+            saveOrderAndDetails(order, CollUtils.singletonList(detail));
+        } catch (DuplicateKeyException e) {
+            throw new DbException(TradeErrorInfo.DUPLICATE_ORDER_FAILED);
+        }
 
         // 5.发送MQ消息，通知报名成功
         rabbitMqHelper.send(
@@ -198,12 +230,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         int total = courseInfos.stream().mapToInt(CourseSimpleInfoDTO::getPrice).sum();
         // 3.计算折扣
         List<OrderCourseDTO> orderCourses = courseInfos.stream()
-                .map(ci ->
-                        new OrderCourseDTO().setId(ci.getId()).setCateId(ci.getThirdCateId()).setPrice(ci.getPrice()))
+                .map(ci -> new OrderCourseDTO().setId(ci.getId()).setCateId(ci.getThirdCateId()).setPrice(ci.getPrice()))
                 .collect(Collectors.toList());
         List<CouponDiscountDTO> discountSolution = promotionClient.findDiscountSolution(orderCourses);
-
-        int discountAmount = 0;
         // 4.生成订单id
         long orderId = IdWorker.getId();
         // 5.组织返回
@@ -215,7 +244,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         return vo;
     }
 
-    private OrderDetail packageOrderDetail(CourseSimpleInfoDTO courseInfo, Order order) {
+    private OrderDetail packageOrderDetail(CourseSimpleInfoDTO courseInfo, Order order, Integer discountValue) {
         OrderDetail detail = new OrderDetail();
         detail.setUserId(order.getUserId());
         detail.setOrderId(order.getId());
@@ -225,7 +254,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         detail.setCoverUrl(courseInfo.getCoverUrl());
         detail.setName(courseInfo.getName());
         detail.setValidDuration(courseInfo.getValidDuration());
-        detail.setDiscountAmount(0);// TODO 计算优惠金额
+        detail.setDiscountAmount(discountValue);
         detail.setRealPayAmount(courseInfo.getPrice() - detail.getDiscountAmount());
         return detail;
     }
@@ -239,9 +268,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new DbException(TradeErrorInfo.PLACE_ORDER_FAILED);
         }
         // 4.2.写订单详情
-        if(orderDetails.size() == 1){
+        if (orderDetails.size() == 1) {
             success = detailService.save(orderDetails.get(0));
-        }else {
+        } else {
             success = detailService.saveBatch(orderDetails);
         }
         if (!success) {
@@ -251,7 +280,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Override
     @Transactional
-    public void cancelOrder(Long orderId) {
+    public void cancelOrder(Long orderId, OrderCancelReason cancelReason) {
         Long userId = UserContext.getUser();
         // 1.查询订单
         Order order = getById(orderId);
@@ -259,18 +288,18 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BadRequestException(ORDER_NOT_EXISTS);
         }
         // 2.判断订单状态是否已经取消，幂等判断
-        if(OrderStatus.CLOSED.equalsValue(order.getStatus())){
-           // 订单已经取消，无需重复操作
-           return;
+        if (OrderStatus.CLOSED.equalsValue(order.getStatus())) {
+            // 订单已经取消，无需重复操作
+            return;
         }
         // 3.判断订单是否未支付，只有未支付订单才可以取消
-        if(!OrderStatus.NO_PAY.equalsValue(order.getStatus())){
+        if (!OrderStatus.NO_PAY.equalsValue(order.getStatus())) {
             throw new BizIllegalException(ORDER_ALREADY_FINISH);
         }
         // 4.可以更新订单状态为取消了
         boolean success = lambdaUpdate()
                 .set(Order::getStatus, OrderStatus.CLOSED.getValue())
-                .set(Order::getMessage, "用户取消订单")
+                .set(Order::getMessage, cancelReason.getMsg())
                 .set(Order::getCloseTime, LocalDateTime.now())
                 .eq(Order::getStatus, OrderStatus.NO_PAY.getValue())
                 .eq(Order::getId, orderId)
@@ -280,6 +309,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         // 5.更新订单条目的状态
         detailService.updateStatusByOrderId(orderId, OrderStatus.CLOSED.getValue());
+
+        // 6.退还优惠券
+        promotionClient.refundCoupon(order.getCouponIds());
     }
 
     @Override
@@ -292,8 +324,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             return;
         }
         // 3.判断订单所属用户与当前登录用户是否一致
-        // bug:Object类型数据在使用=比较时比较的是地址值，且对-128到127的数固定了常用的地址
-        if(!Objects.equals(userId, order.getUserId())){
+        if (!order.getUserId().equals(userId)) {
             // 不一致，说明不是当前用户的订单，结束
             throw new BadRequestException("不能删除他人订单");
         }
@@ -361,6 +392,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         vo.setDetails(dvs);
         // 3.3.订单进度
         vo.setProgressNodes(detailService.packageProgressNodes(order, null));
+
+        // 3.4.优惠明细
+        List<String> rules = promotionClient.queryDiscountRules(order.getCouponIds());
+        vo.setCouponDesc(String.join("/", rules));
         return vo;
     }
 
@@ -373,7 +408,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         // 2.计算超时时间
         LocalDateTime outTime = null;
-        if(OrderStatus.NO_PAY.equalsValue(order.getStatus())){
+        if (OrderStatus.NO_PAY.equalsValue(order.getStatus())) {
             outTime = order.getCreateTime().plusMinutes(tradeProperties.getPayOrderTTLMinutes());
         }
         // 3.封装结果

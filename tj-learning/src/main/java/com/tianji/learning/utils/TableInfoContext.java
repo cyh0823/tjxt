@@ -11,7 +11,7 @@ public class TableInfoContext {
         return TL.get();
     }
 
-    public static void clear() {
+    public static void remove() {
         TL.remove();
     }
 }

@@ -1,20 +1,20 @@
 package com.tianji.promotion.domain.po;
 
-import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
-import java.io.Serializable;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
+
+import java.io.Serializable;
 
 /**
  * <p>
  * 优惠券作用范围信息
  * </p>
  *
- * @author cyhhyc
- * @since 2026-03-27
+ * @author 虎哥
  */
 @Data
 @EqualsAndHashCode(callSuper = false)

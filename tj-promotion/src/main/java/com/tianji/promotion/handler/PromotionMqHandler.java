@@ -3,6 +3,7 @@ package com.tianji.promotion.handler;
 import com.tianji.promotion.domain.dto.UserCouponDTO;
 import com.tianji.promotion.service.IUserCouponService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.amqp.core.ExchangeTypes;
 import org.springframework.amqp.rabbit.annotation.Exchange;
 import org.springframework.amqp.rabbit.annotation.Queue;
 import org.springframework.amqp.rabbit.annotation.QueueBinding;
@@ -20,10 +21,10 @@ public class PromotionMqHandler {
 
     @RabbitListener(bindings = @QueueBinding(
             value = @Queue(name = "coupon.receive.queue", durable = "true"),
-            exchange = @Exchange(name = PROMOTION_EXCHANGE, type = "topic"),
+            exchange = @Exchange(name = PROMOTION_EXCHANGE, type = ExchangeTypes.TOPIC),
             key = COUPON_RECEIVE
     ))
-    public void listenCouponReceive(UserCouponDTO uc) {
-        userCouponService.checkAndSave(uc);
+    public void listenCouponReceiveMessage(UserCouponDTO uc){
+        userCouponService.checkAndCreateUserCoupon(uc);
     }
 }

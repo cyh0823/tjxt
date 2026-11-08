@@ -1,7 +1,6 @@
 package com.tianji.promotion.config;
 
-import com.tianji.promotion.utils.MyLockAspect;
-import org.redisson.api.RedissonClient;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -9,38 +8,39 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 
+@Slf4j
 @Configuration
 public class PromotionConfig {
 
     @Bean
-    public Executor generateExchangeCodeExecutor() {
+    public Executor generateExchangeCodeExecutor(){
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 核心线程池数
+        // 1.核心线程池大小
         executor.setCorePoolSize(2);
-        // 最大线程池数
+        // 2.最大线程池大小
         executor.setMaxPoolSize(5);
-        // 队列容量
+        // 3.队列大小
         executor.setQueueCapacity(200);
-        // 线程名称前缀
+        // 4.线程名称
         executor.setThreadNamePrefix("exchange-code-handler-");
-        // 拒绝策略
+        // 5.拒绝策略
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;
     }
 
-    /*@Bean
-    public MyLockAspect myLockAspect(RedissonClient redissonClient) {
-        return new MyLockAspect(redissonClient);
-    }*/
-
     @Bean
-    public Executor discountSolutionExecutor() {
+    public Executor discountSolutionExecutor(){
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(6);
-        executor.setMaxPoolSize(8);
-        executor.setQueueCapacity(9999);
-        executor.setThreadNamePrefix("discount-solution-handler-");
+        // 1.核心线程池大小
+        executor.setCorePoolSize(12);
+        // 2.最大线程池大小
+        executor.setMaxPoolSize(12);
+        // 3.队列大小
+        executor.setQueueCapacity(99999);
+        // 4.线程名称
+        executor.setThreadNamePrefix("discount-solution-calculator-");
+        // 5.拒绝策略
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
